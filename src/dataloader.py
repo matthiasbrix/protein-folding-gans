@@ -20,8 +20,10 @@ class DataLoader():
         if dataset.lower() == "mnist":
             self.n_classes = 10
             self.img_dims = (self.c, self.h, self.w) = (1, 28, 28)
-            train_set = datasets.MNIST(root=self.root, train=True, download=True)
-            test_set = datasets.MNIST(root=self.root, train=False, download=True)
+            train_set = datasets.MNIST(root=self.root, transform=transforms.Compose(
+                [transforms.ToTensor(), transforms.Normalize([0.5], [0.5])]
+            ), train=True, download=True)
+            test_set = datasets.MNIST(root=self.root, transform=transforms.ToTensor(), train=False, download=True)
         else:
             raise ValueError("DATASET N/A!")
 
@@ -42,10 +44,7 @@ class DataLoader():
         self.test_loader = torch.utils.data.DataLoader(dataset=test_set,\
             batch_size=self.batch_size, drop_last=True, shuffle=True)
 
-    def get_new_test_data_loader(self, sampler=None):
+    def get_new_test_data_loader(self):
         if self.dataset.lower() == "mnist":
             test_set = datasets.MNIST(root=self.root, train=False, transform=transforms.ToTensor(), download=True)
-        batch_size = 1 if sampler is not None else self.batch_size
-        shuffle = sampler is None
-        drop_last = sampler is None
-        return torch.utils.data.DataLoader(dataset=test_set, batch_size=batch_size, shuffle=shuffle, sampler=sampler, drop_last=drop_last)
+        return torch.utils.data.DataLoader(dataset=test_set, batch_size=self.batch_size, shuffle=True, drop_last=True)
