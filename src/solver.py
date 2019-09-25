@@ -4,12 +4,14 @@ import argparse
 import torch
 import torch.utils.data
 import torchvision
+import numpy as np
 
 from models.gan import Gan, Generator, Discriminator
 from model_params import get_model_data_gan
 from directories import Directories
 from dataloader import DataLoader
 from sampling import gan_sampling
+from openprotein.util import calc_pairwise_distances
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -24,8 +26,9 @@ class EpochMetrics():
 class Training(object):
     def __init__(self, solver):
         self.solver = solver
+        self.atom_mask = {"n": 0, "calpha": 1, "cprime": 2}
 
-    def _train_batch(self, epoch_metrics, x, i):
+    def _train_batch(self, epoch_metrics, x):
         x = x.view(-1, self.solver.data_loader.input_dim).to(DEVICE)
         batch_size = x.shape[0]
         valid = torch.ones(batch_size, 1).to(DEVICE) # Discriminator Label to real
@@ -60,9 +63,32 @@ class Training(object):
         for i, train_batch in enumerate(self.solver.data_loader.train_loader):
             if self.solver.data_loader.with_labels:
                 x, _ = train_batch[0], train_batch[1]
+                self._train_batch(epoch_metrics, x)
             else:
-                x = train_batch
-            self._train_batch(epoch_metrics, x, i)
+                # batch_size many of each component below
+                primary_sequence, tertiary_positions, _ = train_batch # (original_aa_string, actual_coords_list, mask) = train_batch
+                # length of primary sequence equals batch_size
+                contact_map = torch.zeros((len(primary_sequence), self.solver.data_loader.residue_fragments, self.solver.data_loader.residue_fragments))
+                for protein_idx in range(len(tertiary_positions)):
+                    # 3x3 is for each residue (amino acid), that is each for N, C_alpha, and C' atom where have the 3D coordinates
+                    residues = np.reshape(tertiary_positions[protein_idx], ((len(tertiary_positions[protein_idx]), 3, 3)))
+                    residues = residues[:self.solver.data_loader.residue_fragments]
+                    resA, resB = self._filter(residues)
+                    contact_map[protein_idx] = calc_pairwise_distances(resA, resB, False)
+                self._train_batch(epoch_metrics, contact_map)
+
+    def _filter(self, residues):
+        atom_mask = self.atom_mask.get(self.solver.data_loader.atom)
+        if atom_mask == 0:
+            resA = np.reshape(residues, (len(residues), 9))[:, :3]
+        if atom_mask == 1:
+            resA = np.reshape(residues, (len(residues), 9))[:, 3:6]
+        if atom_mask == 2:
+            resA = np.reshape(residues, (len(residues), 9))[:, 6:]
+        else:
+            resA = np.reshape(residues, (len(residues), 9))
+        resB = resA
+        return resA, resB
 
 class Solver():
     def __init__(self, model, generator, discriminator, epochs, data_loader, optimizer_G, optimizer_D,\
@@ -104,7 +130,8 @@ class Solver():
         return g_loss, d_loss
 
     def _sample(self, epoch):
-        if not self.data_loader.directories.make_dirs:
+        # don't sample for proteins yet...
+        if not self.data_loader.directories.make_dirs or self.data_loader.dataset is not "mnist":
             return
         with torch.no_grad():
             num_samples = min(self.num_samples, self.data_loader.batch_size)
