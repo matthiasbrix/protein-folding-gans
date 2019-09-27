@@ -2,7 +2,50 @@ import torch
 import torchvision.datasets as datasets
 import torchvision.transforms as transforms
 import numpy as np
-from openprotein.util import contruct_dataloader_from_disk
+import h5py
+# from openprotein.util import contruct_dataloader_from_disk
+
+def contruct_dataloader_from_disk(filename, minibatch_size, drop_last=False):
+    return torch.utils.data.DataLoader(H5PytorchDataset(filename), batch_size=minibatch_size,
+                                       shuffle=True, collate_fn=H5PytorchDataset.merge_samples_to_minibatch,\
+                                        drop_last=drop_last)
+
+def calc_pairwise_distances(chain_a, chain_b, use_gpu):
+    distance_matrix = torch.Tensor(chain_a.size()[0], chain_b.size()[0]).type(torch.float)
+    # add small epsilon to avoid boundary issues
+    epsilon = 10 ** (-4) * torch.ones(chain_a.size(0), chain_b.size(0))
+    if use_gpu:
+        distance_matrix = distance_matrix.cuda()
+        epsilon = epsilon.cuda()
+
+    for i, row in enumerate(chain_a.split(1)):
+        distance_matrix[i] = torch.sum((row.expand_as(chain_b) - chain_b) ** 2, 1).view(1, -1)
+
+    return torch.sqrt(distance_matrix + epsilon)
+
+class H5PytorchDataset(torch.utils.data.Dataset):
+    def __init__(self, filename):
+        super(H5PytorchDataset, self).__init__()
+
+        self.h5pyfile = h5py.File(filename, 'r')
+        self.num_proteins, self.max_sequence_len = self.h5pyfile['primary'].shape
+
+    def __getitem__(self, index):
+        mask = torch.Tensor(self.h5pyfile['mask'][index,:]).type(dtype=torch.uint8)
+        prim = torch.masked_select(torch.Tensor(self.h5pyfile['primary'][index,:]).type(dtype=torch.long), mask)
+        tertiary = torch.Tensor(self.h5pyfile['tertiary'][index][:int(mask.sum())]) # max length x 9
+        return  prim, tertiary, mask
+
+    def __len__(self):
+        return self.num_proteins
+
+    def merge_samples_to_minibatch(samples):
+        samples_list = []
+        for s in samples:
+            samples_list.append(s)
+        # sort according to length of aa sequence
+        samples_list.sort(key=lambda x: len(x[0]), reverse=True)
+        return zip(*samples_list)
 
 class DataLoader():
     def __init__(self, directories, batch_size, dataset, training_file=None, validation_file=None, residue_fragments=128, atom=None):
@@ -31,7 +74,7 @@ class DataLoader():
             self.train_loader = contruct_dataloader_from_disk(training_file, batch_size, drop_last=True)
             self.validation_loader = contruct_dataloader_from_disk(validation_file, batch_size, drop_last=True)
             self.img_dims = (residue_fragments, residue_fragments)
-            self.residue_fragments = residue_fragments # TODO: maybe not needed.....
+            self.residue_fragments = residue_fragments
             self.atom = atom
             self.num_val_batches = len(self.validation_loader)
             self.num_val_samples = self.validation_loader.dataset.__len__() # self.num_val_batches*self.batch_size
@@ -52,6 +95,9 @@ class DataLoader():
             batch_size=self.batch_size, drop_last=True, shuffle=True)
         self.validation_loader = torch.utils.data.DataLoader(dataset=test_set,\
             batch_size=self.batch_size, drop_last=True, shuffle=True)
+
+    def max_sequence_length(self):
+        return self.train_loader.dataset.max_sequence_len
 
     def get_new_test_data_loader(self):
         if self.dataset.lower() == "mnist":
