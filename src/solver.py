@@ -10,9 +10,8 @@ from models.gan import Gan, Generator, Discriminator
 from models.dcgan import Dcgan, Generator, Discriminator
 from model_params import get_model_data_gan, get_model_data_dcgan
 from directories import Directories
-from dataloader import DataLoader, calc_pairwise_distances
+from dataloader import DataLoader
 from sampling import gan_sampling, dcgan_sampling
-#from openprotein.util import calc_pairwise_distances
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -27,7 +26,6 @@ class EpochMetrics():
 class Training(object):
     def __init__(self, solver):
         self.solver = solver
-        self.max_num_fragments = self.solver.data_loader.max_sequence_length()//self.solver.data_loader.residue_fragments
 
     def _train_batch(self, epoch_metrics, x):
         x = x.to(DEVICE)
@@ -43,6 +41,7 @@ class Training(object):
         # Generate a batch of images
         gen_imgs = self.solver.generator(z)
         gen_imgs = torch.clamp(gen_imgs, min=0.0001) # clamp values above zero
+        # settings symmetric here because contact map is only distance to subsequent residues
         gen_imgs = (gen_imgs + gen_imgs.transpose(3, 2))/2 # set symmetric, transpose only spatial dims
         gen_imgs = gen_imgs.expand((gen_imgs.shape[0], self.max_num_fragments, gen_imgs.shape[2], gen_imgs.shape[3]))
         dgz = self.solver.discriminator(gen_imgs)
@@ -59,6 +58,7 @@ class Training(object):
         self.solver.optimizer_D.zero_grad()
         # Measure discriminator's ability to classify real from generated samples
         # D(x) represents the probability with which D thinks that x belongs to p_{data}
+        # TODO: probably needs a channell....
         dx = self.solver.discriminator(x)
         valid = torch.ones_like(dx).to(DEVICE)
         real_loss = self.solver.model.loss(dx, valid)
@@ -76,32 +76,11 @@ class Training(object):
     def train(self, epoch_metrics):
         self.solver.model.train()
         for _, train_batch in enumerate(self.solver.data_loader.train_loader):
-            if self.solver.data_loader.with_labels:
+            if self.solver.data_loader.dataset == "mnist":
                 x, _ = train_batch[0], train_batch[1]
                 self._train_batch(epoch_metrics, x)
-            else:
-                _, tertiary_positions, _ = train_batch # (original_aa_string, actual_coords_list, mask) = train_batch
-                # length of tertiary_positions equals batch_size
-                contact_map = torch.zeros((len(tertiary_positions), self.max_num_fragments,\
-                    self.solver.data_loader.residue_fragments,\
-                    self.solver.data_loader.residue_fragments))
-                for protein_idx in range(len(tertiary_positions)):
-                    # tertiary_positions[protein_idx] yields the (variable) protein length
-                    protein_length = len(tertiary_positions[protein_idx])
-                    num_fragments_extract = protein_length//self.solver.data_loader.residue_fragments
-                    # 3x3 is for each residue (amino acid), that is each for N, C_alpha, and C' atom where we have the 3D coordinates
-                    residues = np.reshape(tertiary_positions[protein_idx], ((protein_length, 3, 3)))
-                    for fragment_id in range(num_fragments_extract):
-                        fragment_residue = residues[fragment_id*self.solver.data_loader.residue_fragments:fragment_id+1*self.solver.data_loader.residue_fragments] # extracting fragments
-                        # in case we extract remaining that is < residue_fragments size, we pad
-                        if fragment_residue.shape[0] < self.solver.data_loader.residue_fragments:
-                            result = np.zeros((self.solver.data_loader.residue_fragments, 3, 3))
-                            result[:fragment_residue.shape[0]] = fragment_residue
-                            fragment_residue = torch.Tensor(result).type(torch.float)
-                        # residues is res_frag x 3 x 3
-                        # TODO: resA and resB????
-                        resA, resB = self._atom_filter(fragment_residue) # usually res_frag x 3 or just how many we have (so if all aminoacid -> res_frag x 9)
-                        contact_map[protein_idx, fragment_id] = calc_pairwise_distances(resA, resB, torch.cuda.is_available())
+            elif self.solver.data_loader.dataset == "proteins":
+                contact_map = train_batch
                 # scale down the contact map
                 if self.solver.data_loader.residue_fragments == 16:
                     contact_map /= 10
@@ -110,18 +89,6 @@ class Training(object):
                 elif self.solver.data_loader.residue_fragments == 128:
                     contact_map /= 100
                 self._train_batch(epoch_metrics, contact_map)
-
-    def _atom_filter(self, residues):
-        if self.solver.data_loader.atom == "nitrogen":
-            resA = np.reshape(residues, (len(residues), 9))[:, :3]
-        elif self.solver.data_loader.atom == "calpha":
-            resA = np.reshape(residues, (len(residues), 9))[:, 3:6]
-        elif self.solver.data_loader.atom == "cprime":
-            resA = np.reshape(residues, (len(residues), 9))[:, 6:]
-        else:
-            resA = np.reshape(residues, (len(residues), 9))
-        resB = resA
-        return resA, resB
 
 class Solver():
     def __init__(self, model, generator, discriminator, epochs, data_loader, optimizer_G, optimizer_D,\
