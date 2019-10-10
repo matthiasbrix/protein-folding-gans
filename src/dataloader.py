@@ -43,17 +43,6 @@ class H5PytorchDataset(torch.utils.data.Dataset):
         samples_list.sort(key=lambda x: len(x[0]), reverse=True)
         return zip(*samples_list)
 
-# TODO: merge with set data loader
-def construct_dataloader_from_disk(file_name, batch_size, num_residue_fragments, mode="contact_map", atom=None, drop_last=False):
-    if mode == "protein":
-        return torch.utils.data.DataLoader(H5PytorchDataset(file_name), batch_size=batch_size, shuffle=True,\
-                                       collate_fn=H5PytorchDataset.merge_samples_to_minibatch,\
-                                       drop_last=drop_last)
-    elif mode == "contact_map":
-        return torch.utils.data.DataLoader(ContactMapDataset(file_name, batch_size, num_residue_fragments, atom),\
-                                    batch_size=batch_size, shuffle=True,\
-                                    drop_last=drop_last)
-
 class DataLoader():
     def __init__(self, directories, batch_size, dataset, training_file=None, validation_file=None, residue_fragments=128, atom=None):
         self.directories = directories
@@ -80,8 +69,10 @@ class DataLoader():
             self.img_dims = (residue_fragments, residue_fragments)
             self.residue_fragments = residue_fragments
             # Takes a matrix N x 3
-            self.train_loader = construct_dataloader_from_disk(training_file, batch_size, self.residue_fragments, atom=atom, drop_last=True)
-            self.validation_loader = construct_dataloader_from_disk(validation_file, batch_size, self.residue_fragments, atom=atom, drop_last=True)
+            self.train_loader = self._construct_dataloader_from_disk(training_file, batch_size,\
+                self.residue_fragments, atom=atom, drop_last=False)
+            self.validation_loader = self._construct_dataloader_from_disk(validation_file, batch_size,\
+                self.residue_fragments, atom=atom, drop_last=False)
             self.atom = atom
             self.num_val_batches = len(self.validation_loader)
             self.num_val_samples = self.validation_loader.dataset.__len__() # self.num_val_batches*self.batch_size
@@ -102,6 +93,17 @@ class DataLoader():
             batch_size=self.batch_size, drop_last=True, shuffle=True)
         self.validation_loader = torch.utils.data.DataLoader(dataset=test_set,\
             batch_size=self.batch_size, drop_last=True, shuffle=True)
+
+    def _construct_dataloader_from_disk(self, file_name, batch_size, num_residue_fragments,\
+                                        mode="contact_map", atom=None, drop_last=False):
+        if mode == "protein":
+            return torch.utils.data.DataLoader(H5PytorchDataset(file_name), batch_size=batch_size, shuffle=True,\
+                                        collate_fn=H5PytorchDataset.merge_samples_to_minibatch,\
+                                        drop_last=drop_last)
+        elif mode == "contact_map":
+            return torch.utils.data.DataLoader(ContactMapDataset(file_name, batch_size, num_residue_fragments, atom),\
+                                        batch_size=batch_size, shuffle=True,\
+                                        drop_last=drop_last)
 
     def get_new_test_data_loader(self):
         if self.dataset.lower() == "mnist":

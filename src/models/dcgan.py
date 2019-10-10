@@ -59,6 +59,10 @@ class Generator(nn.Module):
     def forward(self, z):
         # expect 4-d N, C, H ,W
         gz = self.layers(z)
+        #print(torch.max(gz), torch.min(gz))
+        gz = torch.clamp(gz, min=0.1) # clamp values above zero to ensure positive values
+        # settings symmetric here because contact map is only distance to subsequent residues
+        gz = (gz + gz.transpose(3, 2))/2 # set symmetric, transpose only spatial dims
         return gz
 
 # rep the prob that x from the data rather than p_g

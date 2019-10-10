@@ -4,7 +4,6 @@ import argparse
 import torch
 import torch.utils.data
 import torchvision
-import numpy as np
 
 from models.gan import Gan, Generator, Discriminator
 from models.dcgan import Dcgan, Generator, Discriminator
@@ -12,8 +11,16 @@ from model_params import get_model_data_gan, get_model_data_dcgan
 from directories import Directories
 from dataloader import DataLoader
 from sampling import gan_sampling, dcgan_sampling
+from plots import plot_z_grid
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+
+# TODO: reimplement some of the metrics that they do
+# TODO: take one protein (so tertairy and then compute the contact map and then check that it is valid by using some website to reproduce it, so check their images are identical)
+# TODO: check the hd5py.txt files are ok?
+# TODO: Try looking at the models again and print out a result from gz
+# TODO: check looking into graph thing - I think it is accumulating!
+# TODO: is clamping correct?
 
 class EpochMetrics():
     def __init__(self):
@@ -27,54 +34,50 @@ class Training(object):
     def __init__(self, solver):
         self.solver = solver
 
-    def _train_batch(self, epoch_metrics, x):
-        x = x.to(DEVICE)
-        batch_size = x.shape[0]
-        valid = torch.ones(batch_size, 1).to(DEVICE) # Discriminator Label to real
-        fake = torch.zeros(batch_size, 1).to(DEVICE) # Discriminator Label to fake
-        # -----------------
-        #  Train Generator
-        # -----------------
+    def _train_generator(self, gz):
         self.solver.optimizer_G.zero_grad()
-        # Sample noise as generator input, N x 100 x res x res
-        z = torch.randn((batch_size, self.solver.model.z_dim, *self.solver.data_loader.img_dims)).to(DEVICE)
-        # Generate a batch of images
-        gen_imgs = self.solver.generator(z)
-        gen_imgs = torch.clamp(gen_imgs, min=0.0001) # clamp values above zero
-        # settings symmetric here because contact map is only distance to subsequent residues
-        gen_imgs = (gen_imgs + gen_imgs.transpose(3, 2))/2 # set symmetric, transpose only spatial dims
-        gen_imgs = gen_imgs.expand((gen_imgs.shape[0], self.max_num_fragments, gen_imgs.shape[2], gen_imgs.shape[3]))
-        dgz = self.solver.discriminator(gen_imgs)
-        valid = torch.ones_like(dgz).to(DEVICE)
+        dgz = self.solver.discriminator(gz)
+        real = torch.ones_like(dgz).to(DEVICE)
         # Loss measures generator's ability to fool the discriminator
         # minimizing the log of the inverted probability of the discriminator’s prediction of fake images
-        g_loss = self.solver.model.loss(dgz, valid)
+        g_loss = self.solver.model.loss(dgz, real)
         g_loss.backward()
         self.solver.optimizer_G.step()
-        # ---------------------
-        #  Train Discriminator
-        # ---------------------
+        return g_loss.item()
+
+    def _train_discriminator(self, x, gz):
         # D is a binary classifier
         self.solver.optimizer_D.zero_grad()
         # Measure discriminator's ability to classify real from generated samples
         # D(x) represents the probability with which D thinks that x belongs to p_{data}
-        # TODO: probably needs a channell....
+        x.unsqueeze_(1)
         dx = self.solver.discriminator(x)
-        valid = torch.ones_like(dx).to(DEVICE)
-        real_loss = self.solver.model.loss(dx, valid)
-        dgz = self.solver.discriminator(gen_imgs.detach())
-        fake = torch.zeros_like(dgz)
+        real = torch.ones_like(dx).to(DEVICE)
+        real_loss = self.solver.model.loss(dx, real)
+        dgz = self.solver.discriminator(gz)
+        fake = torch.zeros_like(dgz).to(DEVICE)
         fake_loss = self.solver.model.loss(dgz, fake)
         # The addition of these values means that lower average values of this loss function
         # result in better performance of the discriminator.
         d_loss = (real_loss + fake_loss)/2
         d_loss.backward()
         self.solver.optimizer_D.step()
+        return d_loss.item()
 
-        epoch_metrics.compute_batch_train_metrics(g_loss.item(), d_loss.item())
+    def _train_batch(self, epoch_metrics, x):
+        x = x.to(DEVICE)
+        batch_size = x.shape[0]
+        # Sample noise as generator input, N x 100 x res x res
+        z = torch.randn((batch_size, self.solver.model.z_dim, *self.solver.data_loader.img_dims)).to(DEVICE)
+        # Generate a batch of images
+        gz = self.solver.generator(z)
+        d_loss = self._train_discriminator(x, gz.detach())
+        g_loss = self._train_generator(gz)
+        epoch_metrics.compute_batch_train_metrics(g_loss, d_loss)
 
     def train(self, epoch_metrics):
-        self.solver.model.train()
+        self.solver.generator.train()
+        self.solver.discriminator.train()
         for _, train_batch in enumerate(self.solver.data_loader.train_loader):
             if self.solver.data_loader.dataset == "mnist":
                 x, _ = train_batch[0], train_batch[1]
@@ -129,21 +132,40 @@ class Solver():
         self.train_loss_history["d_loss"].append(d_loss)
         return g_loss, d_loss
 
+    def get_sample_stats(self):
+        if self.data_loader.batch_size >= 32:
+            imgs = 25
+            rows = 5
+            cols = 5
+        elif self.data_loader.batch_size == 16:
+            imgs = 16
+            rows = 4
+            cols = 4
+        elif self.data_loader.batch_size == 8:
+            imgs = 8
+            rows = 2
+            cols = 4
+        elif self.data_loader.batch_size == 4:
+            imgs = 4
+            rows = 2
+            cols = 2
+        return imgs, rows, cols
+
     def _sample(self, epoch):
         if not self.data_loader.directories.make_dirs:
             return
         with torch.no_grad():
             num_samples = min(self.num_samples, self.data_loader.batch_size)
             if self.data_loader.dataset == "mnist":
-                sample = gan_sampling(self.generator, self.model.z_dim, num_samples)
+                sample = gan_sampling(self.generator, self.model.z_dim, num_samples).cpu()
                 torchvision.utils.save_image(sample.view(num_samples, *self.data_loader.img_dims),\
                     self.data_loader.directories.result_dir + "/generated_sample_" + str(epoch)\
                     + "_z=" + str(self.model.z_dim) + ".png", nrow=10, normalize=True)
             elif self.data_loader.dataset == "proteins":
-                sample = dcgan_sampling(self.generator, self.model.z_dim, self.data_loader.img_dims, num_samples)
-                torchvision.utils.save_image(sample.view(num_samples, *sample.shape[1:]),\
-                    self.data_loader.directories.result_dir + "/generated_sample_" + str(epoch)\
-                    + "_z=" + str(self.model.z_dim) + ".png", nrow=6)
+                imgs, rows, cols = self.get_sample_stats()
+                sample = dcgan_sampling(self.generator, self.model.z_dim, self.data_loader.img_dims, num_samples).cpu()
+                plot_z_grid(sample[:imgs], self.data_loader.directories.result_dir + "/generated_sample_" + str(epoch)\
+                    + "_z=" + str(self.model.z_dim) + ".png", rows=rows, cols=cols, fill=True)
 
     # save the model parameters to a txt file in the output folder
     def _save_model_params_to_file(self):
@@ -233,8 +255,6 @@ if __name__ == "__main__":
         model = Gan(data_loader.input_dim, data["z_dim"])
         generator = Generator(data["z_dim"], data_loader.input_dim, data_loader.img_dims)
         discriminator = Discriminator(data_loader.input_dim, 1)
-        solver = Solver(model, generator, discriminator, data["epochs"], data_loader, data["optimizer_G"],
-                data["optimizer_D"], data["optim_config_G"], data["optim_config_D"], save_model_state=save_model_state)
     elif model_arg.lower() == "dcgan":
         training_file = args["training_file"]
         validation_file = args["validation_file"]
@@ -247,8 +267,7 @@ if __name__ == "__main__":
                          residue_fragments=residue_fragments, atom="calpha")
         model = Dcgan(data_loader.input_dim, data["z_dim"])
         generator = Generator(data["z_dim"], data_loader.input_dim, data_loader.img_dims, res=residue_fragments)
-        discriminator = Discriminator(data_loader.max_sequence_length()//data_loader.residue_fragments,\
-                        1, res=residue_fragments)
-        solver = Solver(model, generator, discriminator, data["epochs"], data_loader, data["optimizer_G"],
-                data["optimizer_D"], data["optim_config_G"], data["optim_config_D"], save_model_state=save_model_state)
+        discriminator = Discriminator(1, 1, res=residue_fragments)
+    solver = Solver(model, generator, discriminator, data["epochs"], data_loader, data["optimizer_G"],
+                    data["optimizer_D"], data["optim_config_G"], data["optim_config_D"], save_model_state=save_model_state)
     solver.main()
