@@ -4,12 +4,11 @@ import torch
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Generator(nn.Module):
-    def __init__(self, din, dout, img_dims, res=16):
+    def __init__(self, nz, res=16):
         super(Generator, self).__init__()
-        self.img_dims = img_dims
         if res == 128:
             self.layers = nn.Sequential(
-                nn.ConvTranspose2d(din, 512, 4, stride=4, padding=0),
+                nn.ConvTranspose2d(nz, 512, 4, stride=4, padding=0),
                 nn.BatchNorm2d(512),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1),
@@ -25,7 +24,7 @@ class Generator(nn.Module):
             )
         elif res == 64:
             self.layers = nn.Sequential(
-                nn.ConvTranspose2d(din, 512, 4, stride=1, padding=0),
+                nn.ConvTranspose2d(nz, 512, 4, stride=1, padding=0),
                 nn.BatchNorm2d(512),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1),
@@ -41,7 +40,7 @@ class Generator(nn.Module):
             )
         else:
             self.layers = nn.Sequential(
-                nn.ConvTranspose2d(din, 512, 4, stride=1, padding=0), # 16 x 16 => 19, 19
+                nn.ConvTranspose2d(nz, 512, 4, stride=1, padding=0), # 16 x 16 => 19, 19
                 nn.BatchNorm2d(512),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(512, 256, 3, stride=1, padding=1), # 19 x 19
@@ -59,10 +58,6 @@ class Generator(nn.Module):
     def forward(self, z):
         # expect 4-d N, C, H ,W
         gz = self.layers(z)
-        #print(torch.max(gz), torch.min(gz))
-        gz = torch.clamp(gz, min=0.1) # clamp values above zero to ensure positive values
-        # settings symmetric here because contact map is only distance to subsequent residues
-        gz = (gz + gz.transpose(3, 2))/2 # set symmetric, transpose only spatial dims
         return gz
 
 # rep the prob that x from the data rather than p_g
@@ -112,22 +107,22 @@ class Discriminator(nn.Module):
             )
         else:
             self.layers = nn.Sequential(
-                nn.Conv2d(din, 64, 3, stride=1, padding=1), # N, 64, 76, 76
+                nn.Conv2d(din, 64, 3, stride=1, padding=1),
                 nn.LeakyReLU(0.2),
                 nn.Dropout(0.1),
-                nn.Conv2d(64, 128, 4, stride=2, padding=1), # N, 128, 38, 38
+                nn.Conv2d(64, 128, 4, stride=2, padding=1),
                 nn.BatchNorm2d(128),
                 nn.LeakyReLU(0.2),
                 nn.Dropout(0.1),
-                nn.Conv2d(128, 256, 4, stride=2, padding=1), # N, 256, 19, 19
+                nn.Conv2d(128, 256, 4, stride=2, padding=1),
                 nn.BatchNorm2d(256),
                 nn.LeakyReLU(0.2),
                 nn.Dropout(0.1),
-                nn.Conv2d(256, 512, 3, stride=1, padding=1), # N, 512, 19, 19
+                nn.Conv2d(256, 512, 3, stride=1, padding=1),
                 nn.BatchNorm2d(512),
                 nn.LeakyReLU(0.2),
                 nn.Dropout(0.1),
-                nn.Conv2d(512, dout, 4, stride=1, padding=0), # N, 1, 16, 16
+                nn.Conv2d(512, dout, 4, stride=1, padding=0),
                 nn.Sigmoid()
             )
 

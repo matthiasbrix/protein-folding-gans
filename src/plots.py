@@ -46,7 +46,7 @@ def plot_z_samples(gz, save_fig=False, result_dir=None, dataset=None):
 
 # https://stackoverflow.com/questions/53255432/saving-a-grid-of-heterogenous-images-in-python
 # useful/needed for contact maps
-def plot_z_grid(ims, file_name, rows=None, cols=None, fill=True, showax=False):
+def contact_map_grid(ims, rows=None, cols=None, fill=True, showax=False, file_name=None, show=False):
     if rows is None != cols is None:
         raise ValueError("Set either both rows and cols or neither.")
 
@@ -66,5 +66,11 @@ def plot_z_grid(ims, file_name, rows=None, cols=None, fill=True, showax=False):
         if not showax:
             ax.set_axis_off()
 
-    fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
+    if file_name and show:
+        plt.show()
+        fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
+    elif file_name:
+        fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
+    else:
+        plt.show()
     plt.close()
