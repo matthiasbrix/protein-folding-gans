@@ -10,7 +10,7 @@ class ContactMapDataset(torch.utils.data.Dataset):
         super(ContactMapDataset, self).__init__()
         # property that reads in the contact maps from the given file name (and residue length)
         # in format batch_size x residue_length x residue_length
-        self.contact_maps = contact_maps.get_contact_maps(file_name, num_residue_fragments, atom) #.create_contact_maps(file_name, num_residue_fragments, atom)
+        self.contact_maps = contact_maps.get_contact_maps(file_name, num_residue_fragments, atom)
 
     def __getitem__(self, index):
         return self.contact_maps[index]
@@ -24,7 +24,6 @@ class H5PytorchDataset(torch.utils.data.Dataset):
 
         self.h5pyfile = h5py.File(filename, 'r')
         self.num_proteins, self.max_sequence_len = self.h5pyfile['primary'].shape
-        #print("HER", self.num_proteins, self.max_sequence_len, self.h5pyfile['tertiary'][0].shape, self.h5pyfile['tertiary'][1].shape, self.h5pyfile['mask'][0])
 
     def __getitem__(self, index):
         mask = torch.Tensor(self.h5pyfile['mask'][index,:]).type(dtype=torch.uint8)
@@ -70,7 +69,8 @@ class DataLoader():
             self.img_dims = (residue_fragments, residue_fragments)
             self.residue_fragments = residue_fragments
             self.atom = atom
-            self._set_data_loader(self, training_file)
+            self._set_data_loader(training_file)
+            self.training_file = training_file
         else:
             raise ValueError("DATASET N/A!")
 
@@ -106,6 +106,6 @@ class DataLoader():
     def get_new_test_data_loader(self, testing_file=None):
         if self.dataset.lower() == "mnist":
             test_set = datasets.MNIST(root=self.root, train=False, transform=transforms.ToTensor(), download=True)
+            return torch.utils.data.DataLoader(dataset=test_set, batch_size=self.batch_size, shuffle=True, drop_last=True)
         elif self.dataset.lower() == "proteins":
-            self._construct_dataloader_from_disk(testing_file, self.batch_size, self.residue_fragments, atom=self.atom, drop_last=False)
-        return torch.utils.data.DataLoader(dataset=test_set, batch_size=self.batch_size, shuffle=True, drop_last=True)
+            return self._construct_dataloader_from_disk(testing_file, self.batch_size, self.residue_fragments, atom=self.atom, drop_last=False)

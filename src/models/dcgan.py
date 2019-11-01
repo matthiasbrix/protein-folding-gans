@@ -136,3 +136,9 @@ class Dcgan(nn.Module):
         self.z_dim = z_dim
         self.input_dim = input_dim
         self.loss = nn.BCELoss()
+
+    def kl_divergence_z(self, z):
+        mean = torch.mean(z)
+        variance = torch.var(z) # \sigma^2
+        kl_divergence = 1/2 * torch.sum(1 + variance.log() - mean.pow(2) - variance)
+        return kl_divergence

@@ -23,6 +23,34 @@ class EpochMetrics():
         self.g_loss_acc += g_loss
         self.d_loss_acc += d_loss
 
+class Testing(object):
+    def __init__(self, solver):
+        self.solver = solver
+
+    # testing the "complexity" of the GAN as defined by Anand and Huang, supplementary material
+    # find a z such that G(z) \in x
+    def _test_batch(self, x, optimizer_G):
+        batch_size = x.shape[0]
+        z = torch.randn((batch_size, self.solver.model.z_dim, 1, 1)).to(DEVICE)
+        gz = self.solver.generator(z)
+        # no clamping/symmetric operations as that is done only during training!
+        #real = torch.ones_like(gz).to(DEVICE)
+        gamma = 10
+        # ||G(z) - x||_2 + \gamma D_{KL}[N(\mu(z), \sigma^2(z))||N(0,1)]
+        loss = self.solver.model.loss(gz, x) + gamma*self.solver.model.kl_divergence_z(gz)
+        loss.backward()
+        optimizer_G.step()
+
+    def test(self, optimizer_G, test_loader, epochs=3000, step_size=10, gamma=0.97):
+        print("Testing complexity of the GAN")
+        scheduler = torch.optim.StepLR(optimizer_G, step_size=step_size, gamma=gamma)
+        self.solver.generator.train()
+        for _ in range(epochs):
+            for _, test_batch in enumerate(test_loader):
+                contact_map = test_batch
+                self._test_batch(contact_map, optimizer_G)
+                scheduler.step()
+
 class Training(object):
     def __init__(self, solver):
         self.solver = solver
@@ -68,7 +96,6 @@ class Training(object):
         batch_size = x.shape[0]
         # Sample noise as generator input, N x 100 x res x res
         z = torch.randn((batch_size, self.solver.model.z_dim, 1, 1)).to(DEVICE)
-        #z = torch.randn((batch_size, self.solver.model.z_dim, *self.solver.data_loader.img_dims)).to(DEVICE)
         # Generate a batch of images
         gz = self.solver.generator(z)
         gz = torch.clamp(gz, min=0.001) # clamp values above zero to ensure positive values
@@ -77,7 +104,7 @@ class Training(object):
         d_loss = self._train_discriminator(x, gz.detach())
         g_loss = self._train_generator(gz)
         epoch_metrics.compute_batch_train_metrics(g_loss, d_loss)
-
+       
     def train(self, epoch_metrics):
         self.solver.generator.train()
         self.solver.discriminator.train()
@@ -193,6 +220,7 @@ class Solver():
             if self.data_loader.dataset == "proteins":
                 params += "atom: {}\n".format(self.data_loader.atom)
             params += "Max sequence length: {}\n".format(self.max_sequence_length)
+            params += "training file: {}\n".format(self.data_loader.training_file)
             params += str(self.model)
             params += str(self.generator)
             params += str(self.discriminator)
