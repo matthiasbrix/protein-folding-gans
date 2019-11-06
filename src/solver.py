@@ -17,10 +17,13 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class EpochMetrics():
     def __init__(self):
-        self.g_loss_acc, self.d_loss_acc = 0.0, 0.0
+        self.g_loss_acc, self.d_loss_real_acc = 0.0, 0.0
+        self.d_loss_fake_acc, self.d_loss_acc = 0.0, 0.0
 
-    def compute_batch_train_metrics(self, g_loss, d_loss):
+    def compute_batch_train_metrics(self, g_loss, d_loss_real, d_loss_fake, d_loss):
         self.g_loss_acc += g_loss
+        self.d_loss_real_acc += d_loss_real
+        self.d_loss_fake_acc += d_loss_fake
         self.d_loss_acc += d_loss
 
 class Testing(object):
@@ -34,16 +37,14 @@ class Testing(object):
         z = torch.randn((batch_size, self.solver.model.z_dim, 1, 1)).to(DEVICE)
         gz = self.solver.generator(z)
         # no clamping/symmetric operations as that is done only during training!
-        #real = torch.ones_like(gz).to(DEVICE)
-        gamma = 10
         # ||G(z) - x||_2 + \gamma D_{KL}[N(\mu(z), \sigma^2(z))||N(0,1)]
-        loss = self.solver.model.loss(gz, x) + gamma*self.solver.model.kl_divergence_z(gz)
+        loss = self.solver.model.loss(gz, x) + 10*self.solver.model.kl_divergence_z(gz)
         loss.backward()
         optimizer_G.step()
 
     def test(self, optimizer_G, test_loader, epochs=3000, step_size=10, gamma=0.97):
         print("Testing complexity of the GAN")
-        scheduler = torch.optim.StepLR(optimizer_G, step_size=step_size, gamma=gamma)
+        scheduler = torch.optim.lr_scheduler.StepLR(optimizer_G, step_size=step_size, gamma=gamma)
         self.solver.generator.train()
         for _ in range(epochs):
             for _, test_batch in enumerate(test_loader):
@@ -56,16 +57,21 @@ class Training(object):
         self.solver = solver
 
     def _train_generator(self, gz):
-        self.solver.optimizer_G.zero_grad()
-        dgz = self.solver.discriminator(gz)
-        real = torch.ones_like(dgz).to(DEVICE)
-        # Loss measures generator's ability to fool the discriminator
-        # minimizing the log of the inverted probability of the discriminator’s prediction of fake images
-        g_loss = self.solver.model.loss(dgz, real)
-        g_loss.backward()
-        loss = g_loss.item()
-        self.solver.optimizer_G.step()
-        return loss
+        loss = 0.0
+        for i in range(self.solver.g_updates):
+            self.solver.optimizer_G.zero_grad()
+            dgz = self.solver.discriminator(gz)
+            real = torch.ones_like(dgz).to(DEVICE)
+            # Loss measures generator's ability to fool the discriminator
+            # minimizing the log of the inverted probability of the discriminator’s prediction of fake images
+            g_loss = self.solver.model.loss(dgz, real)
+            if i == (self.solver.g_updates-1):
+                g_loss.backward()
+            else:
+                g_loss.backward(retain_graph=True)
+            loss += g_loss.item()
+            self.solver.optimizer_G.step()
+        return loss/self.solver.g_updates
 
     def _train_discriminator(self, x, gz):
         # D is a binary classifier
@@ -75,8 +81,8 @@ class Training(object):
         x.unsqueeze_(1)
         # real
         dx = self.solver.discriminator(x)
-        real = torch.ones_like(dx).to(DEVICE)
-        real_loss = self.solver.model.loss(dx, real)
+        real = torch.FloatTensor([self.solver.one_sided_labeling]).repeat(x.shape[0]).to(DEVICE) # ONE SIDED LABELING
+        real_loss = self.solver.model.loss(dx.reshape(-1).to(DEVICE), real)
         real_loss.backward()
         # fake
         dgz = self.solver.discriminator(gz)
@@ -87,9 +93,8 @@ class Training(object):
         # result in better performance of the discriminator.
         # Add the gradients from the all-real and all-fake batches
         d_loss = real_loss + fake_loss
-        #d_loss.backward()
         self.solver.optimizer_D.step()
-        return d_loss.item()
+        return real_loss.item(), fake_loss.item(), d_loss.item()
 
     def _train_batch(self, epoch_metrics, x):
         x = x.to(DEVICE)
@@ -101,10 +106,10 @@ class Training(object):
         gz = torch.clamp(gz, min=0.001) # clamp values above zero to ensure positive values
         # settings symmetric here because contact map is only distance to subsequent residues
         gz = (gz + gz.transpose(3, 2))/2 # set symmetric, transpose only spatial dims
-        d_loss = self._train_discriminator(x, gz.detach())
+        d_loss_real, d_loss_fake, d_loss = self._train_discriminator(x, gz.detach())
         g_loss = self._train_generator(gz)
-        epoch_metrics.compute_batch_train_metrics(g_loss, d_loss)
-       
+        epoch_metrics.compute_batch_train_metrics(g_loss, d_loss_real, d_loss_fake, d_loss)
+
     def train(self, epoch_metrics):
         self.solver.generator.train()
         self.solver.discriminator.train()
@@ -125,7 +130,8 @@ class Training(object):
 
 class Solver():
     def __init__(self, model, generator, discriminator, epochs, data_loader, optimizer_G, optimizer_D,\
-        optim_config_G, optim_config_D, max_sequence_length, num_samples=100, save_model_state=False):
+        optim_config_G, optim_config_D, max_sequence_length, one_sided_labeling, g_updates,\
+        num_samples=100, save_model_state=False):
         self.data_loader = data_loader
         self.model = model
         self.generator = generator
@@ -139,8 +145,10 @@ class Solver():
         self.max_sequence_length = max_sequence_length
         self.epoch = 0
         self.epochs = epochs
-        self.train_loss_history = {x: [] for x in ["epochs", "g_loss", "d_loss"]}
+        self.train_loss_history = {x: [] for x in ["epochs", "g_loss", "d_loss_real", "d_loss_fake", "d_loss"]}
         self.num_samples = num_samples
+        self.one_sided_labeling = one_sided_labeling
+        self.g_updates = g_updates
 
         if save_model_state and not self.data_loader.directories.make_dirs:
             raise ValueError("Can't save state if no folder is assigned to this run!")
@@ -154,14 +162,17 @@ class Solver():
             optim_config["weight_decay"] = 1/(float(self.data_loader.num_train_samples))
 
     def _save_train_metrics(self, epoch, metrics):
-        #num_train_samples = self.data_loader.num_train_samples
         num_batch_samples = self.data_loader.num_train_batches
         g_loss = metrics.g_loss_acc/num_batch_samples
+        d_loss_real = metrics.d_loss_real_acc/num_batch_samples
+        d_loss_fake = metrics.d_loss_fake_acc/num_batch_samples
         d_loss = metrics.d_loss_acc/num_batch_samples
         self.train_loss_history["epochs"].append(epoch)
         self.train_loss_history["g_loss"].append(g_loss)
+        self.train_loss_history["d_loss_real"].append(d_loss_real)
+        self.train_loss_history["d_loss_fake"].append(d_loss_fake)
         self.train_loss_history["d_loss"].append(d_loss)
-        return g_loss, d_loss
+        return g_loss, d_loss_real, d_loss_fake, d_loss
 
     def get_sample_stats(self):
         if self.data_loader.batch_size >= 32:
@@ -221,6 +232,8 @@ class Solver():
                 params += "atom: {}\n".format(self.data_loader.atom)
             params += "Max sequence length: {}\n".format(self.max_sequence_length)
             params += "training file: {}\n".format(self.data_loader.training_file)
+            params += "g_updates: {}\n".format(self.g_updates)
+            params += "one_sided_labeling: {}\n".format(self.one_sided_labeling)
             params += str(self.model)
             params += str(self.generator)
             params += str(self.discriminator)
@@ -250,12 +263,13 @@ class Solver():
             epoch_watch = time.time()
             epoch_metrics = EpochMetrics()
             training.train(epoch_metrics)
-            g_loss, d_loss = self._save_train_metrics(epoch, epoch_metrics)
-            print("====> Epoch: {} g_loss / d_loss avg: {:.4f} / {:.4f}".format(epoch, g_loss, d_loss))
+            g_loss, d_loss_real, d_loss_fake, d_loss = self._save_train_metrics(epoch, epoch_metrics)
+            print("====> Epoch: {} g_loss {:.4f} / d_loss_real {:.4f} / d_loss_fake {:.4f} / d_loss avg: {:.4f}".format(
+                epoch, g_loss, d_loss_real, d_loss_fake, d_loss))
             self._sample(epoch)
-            if self.save_model_state:
+            if self.save_model_state and (epoch % 5) == 0:
                 self.epoch = epoch+1 # signifying to continue from epoch+1 on.
-                torch.save(self, self.data_loader.directories.result_dir + "/model_state.pt")
+                torch.save(self, self.data_loader.directories.result_dir + "/model_state_" + str(epoch) + ".pt")
             print("{:.2f} seconds for epoch {}".format(time.time() - epoch_watch, epoch))
         self._save_final_model()
         print("+++++ RUN IS FINISHED +++++")
@@ -304,5 +318,5 @@ if __name__ == "__main__":
         discriminator = Discriminator(1, 1, res=residue_fragments)
     solver = Solver(model, generator, discriminator, data["epochs"], data_loader, data["optimizer_G"],
                     data["optimizer_D"], data["optim_config_G"], data["optim_config_D"], max_sequence_length,\
-                    save_model_state=save_model_state)
+                    data["one_sided_labeling"], data["g_updates"], save_model_state=save_model_state)
     solver.main()

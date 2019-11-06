@@ -56,7 +56,7 @@ class Generator(nn.Module):
             )
 
     def forward(self, z):
-        # expect 4-d N, C, H ,W
+        # expects 4-d N, C, H ,W
         gz = self.layers(z)
         return gz
 

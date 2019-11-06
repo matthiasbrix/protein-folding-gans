@@ -26,11 +26,15 @@ def atom_filter(residues, atom):
     else:
         return residues
 
+# TODO: not in use
 def pad_fragment(fragment, fragment_length):
+    print("FRAG", fragment.shape)
     tmp = torch.zeros((fragment_length, 3))
     tmp[:fragment.shape[0]] = fragment
+    print(tmp.shape)
     return torch.Tensor(tmp).type(torch.float) # dim is then fragment_length x 3
 
+# Pad the pairwise distance matrix
 def pad_pwd(pwd, fragment_length):
     tmp = torch.zeros((fragment_length, fragment_length))
     tmp[:pwd.shape[0], :pwd.shape[1]] = pwd
@@ -43,12 +47,18 @@ def compute_contact_maps(residues, num_fragments_extract, fragment_length):
         end = (fragment_id+1)*fragment_length
         # extracting fragment
         fragment = residues[start:end]
+        '''
         # compute matrix on the fragments
         pwd = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
         # in case we extract remaining, that is < residue_fragments size, we pad
         if fragment.shape[0] < fragment_length:
             pwd = pad_pwd(pwd, fragment_length)
         contact_maps[fragment_id] = pwd
+        '''
+        if fragment.shape[0] < fragment_length:
+            fragment = pad_fragment(fragment, fragment_length)
+        # compute matrix on the fragments
+        contact_maps[fragment_id] = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
     return contact_maps
 
 def create_contact_maps(file_name, fragment_length, atom):

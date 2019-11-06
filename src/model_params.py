@@ -27,8 +27,10 @@ def get_model_data_dcgan(dataset):
     if dataset.lower() == "proteins":
         params = {
             "epochs": 50,
-            "batch_size": 32,
+            "batch_size": 8,
             "z_dim": 100,
+            "one_sided_labeling": 1.0,
+            "g_updates": 1,
             "optimizer_G": torch.optim.Adam,
             "optimizer_D": torch.optim.Adam,
             "optim_config_G": {
