@@ -74,3 +74,4 @@ def contact_map_grid(ims, rows=None, cols=None, fill=True, showax=False, file_na
     else:
         plt.show()
     plt.close()
+

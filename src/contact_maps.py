@@ -26,12 +26,9 @@ def atom_filter(residues, atom):
     else:
         return residues
 
-# TODO: not in use
 def pad_fragment(fragment, fragment_length):
-    print("FRAG", fragment.shape)
     tmp = torch.zeros((fragment_length, 3))
     tmp[:fragment.shape[0]] = fragment
-    print(tmp.shape)
     return torch.Tensor(tmp).type(torch.float) # dim is then fragment_length x 3
 
 # Pad the pairwise distance matrix
@@ -40,28 +37,33 @@ def pad_pwd(pwd, fragment_length):
     tmp[:pwd.shape[0], :pwd.shape[1]] = pwd
     return torch.Tensor(tmp).type(torch.float)
 
-def compute_contact_maps(residues, num_fragments_extract, fragment_length):
+def compute_contact_maps(residues, num_fragments_extract, fragment_length, padding):
     contact_maps = torch.zeros((num_fragments_extract, fragment_length, fragment_length))
     for fragment_id in range(num_fragments_extract):
         start = fragment_id*fragment_length
         end = (fragment_id+1)*fragment_length
         # extracting fragment
         fragment = residues[start:end]
-        '''
-        # compute matrix on the fragments
-        pwd = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
-        # in case we extract remaining, that is < residue_fragments size, we pad
-        if fragment.shape[0] < fragment_length:
-            pwd = pad_pwd(pwd, fragment_length)
-        contact_maps[fragment_id] = pwd
-        '''
-        if fragment.shape[0] < fragment_length:
-            fragment = pad_fragment(fragment, fragment_length)
-        # compute matrix on the fragments
-        contact_maps[fragment_id] = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
+        if padding == "fragment_pad":
+            if fragment.shape[0] < fragment_length:
+                fragment = pad_fragment(fragment, fragment_length)
+                # compute matrix on the fragments
+            contact_maps[fragment_id] = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
+        if padding == "pwd_pad":
+            pwd = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
+            # in case we extract remaining, that is < residue_fragments size, we pad
+            if fragment.shape[0] < fragment_length:
+                pwd = pad_pwd(pwd, fragment_length)
+            contact_maps[fragment_id] = pwd
+        if padding == "no_pad":
+            if fragment.shape[0] < fragment_length:q
+                contact_maps = np.delete(contact_maps, fragment_id, 0)
+            else:
+                pwd = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
+                contact_maps[fragment_id] = pwd
     return contact_maps
 
-def create_contact_maps(file_name, fragment_length, atom):
+def create_contact_maps(file_name, fragment_length, atom, padding):
     h5pyfile = h5py.File(file_name, 'r')
     num_proteins, _ = h5pyfile['primary'].shape # _ is max_sequence_len
     all_contact_maps = []
@@ -80,34 +82,34 @@ def create_contact_maps(file_name, fragment_length, atom):
         residues = atom_filter(residues, atom)
         num_fragments_extract = max(protein_length, fragment_length)//fragment_length # non-overlapping fragments
         #print(residues.shape, num_fragments_extract, fragment_length)
-        contact_maps = compute_contact_maps(residues, num_fragments_extract, fragment_length)
+        contact_maps = compute_contact_maps(residues, num_fragments_extract, fragment_length, padding)
         all_contact_maps.append(contact_maps)
     print("{0} broken proteins read out of {1}!".format(broken_prots, num_proteins))
     contact_maps = torch.cat(all_contact_maps)
     # serialize contact maps and cache them
-    dump_contact_maps(contact_maps, file_name, fragment_length)
+    dump_contact_maps(contact_maps, file_name, fragment_length, padding)
     return contact_maps
 
-def get_cache_file(file_name, fragment_length):
-    return file_name+"_"+str(fragment_length)+"_contact_maps.dat"
+def get_cache_file(file_name, fragment_length, padding):
+    return file_name+"_"+str(fragment_length)+"_"+padding+"_contact_maps.dat"
 
 # serializes the contact maps to binary files for caching
-def dump_contact_maps(contact_maps, file_name, fragment_length):
+def dump_contact_maps(contact_maps, file_name, fragment_length, padding):
     tmp = file_name.split("/")
     fn = "/".join(tmp[:-1])+"/"+tmp[-1].split(".")[0]
-    cache_file = get_cache_file(fn, fragment_length)
+    cache_file = get_cache_file(fn, fragment_length, padding)
     print("Caching the contact maps to {}".format(cache_file))
     torch.save(contact_maps, cache_file)
 
 # 1. get from file in data/proteins/contact_map_xx.dat (xx is 50 or so, so density)
 # 2. if not existing, call create_contact_map
-def get_contact_maps(file_name, fragment_length=None, atom=None):
+def get_contact_maps(file_name, fragment_length=None, atom=None, padding="pwd_pad"):
     tmp = file_name.split("/")
     fn = "/".join(tmp[:-1])+"/"+tmp[-1].split(".")[0]
-    cache_file = get_cache_file(fn, fragment_length)
+    cache_file = get_cache_file(fn, fragment_length, padding)
     if os.path.isfile(cache_file):
         print("Reading cache file in {}".format(cache_file))
         return torch.load(cache_file)
     else:
         print("Creating the contact maps for {} as no cache was found!".format(file_name))
-        return create_contact_maps(file_name, fragment_length, atom)
+        return create_contact_maps(file_name, fragment_length, atom, padding)

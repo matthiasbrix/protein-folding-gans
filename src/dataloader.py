@@ -6,11 +6,11 @@ import h5py
 import contact_maps
 
 class ContactMapDataset(torch.utils.data.Dataset):
-    def __init__(self, file_name, num_residue_fragments, atom):
+    def __init__(self, file_name, num_residue_fragments, atom, padding):
         super(ContactMapDataset, self).__init__()
         # property that reads in the contact maps from the given file name (and residue length)
         # in format batch_size x residue_length x residue_length
-        self.contact_maps = contact_maps.get_contact_maps(file_name, num_residue_fragments, atom)
+        self.contact_maps = contact_maps.get_contact_maps(file_name, num_residue_fragments, atom, padding)
 
     def __getitem__(self, index):
         return self.contact_maps[index]
@@ -44,7 +44,7 @@ class H5PytorchDataset(torch.utils.data.Dataset):
 
 class DataLoader():
     def __init__(self, directories, batch_size, dataset, training_file=None,\
-        residue_fragments=128, atom=None):
+        residue_fragments=128, atom=None, padding="pwd_pad"):
         self.directories = directories
         self.data = None
         self.n_classes = None
@@ -56,6 +56,7 @@ class DataLoader():
         self.dataset = dataset
 
         self.root = directories.data_dir_prefix+dataset
+        self.padding = padding
 
         if dataset.lower() == "mnist":
             self.n_classes = 10
@@ -81,6 +82,12 @@ class DataLoader():
         self.num_train_samples = self.train_loader.dataset.__len__() # self.num_train_batches*self.batch_size
 
         print(self.img_dims, self.input_dim, len(self.train_loader), self.num_train_batches, self.num_train_samples)
+        stats = "num_batches: {}\n"\
+                "num_train_samples: {}\n".format(self.num_train_batches, self.num_train_samples)
+        with open(training_file+"_"+str(self.residue_fragments)+"_stats.txt", "w") as contact_map_stats:
+            stats = "num_batches: {}\n"\
+                "num_train_samples: {}".format(self.num_train_batches, self.num_train_samples)
+            contact_map_stats.write(stats)
 
     def _set_data_loader(self, train_set, test_set=None):
         if self.dataset.lower() == "mnist":
@@ -99,8 +106,8 @@ class DataLoader():
                                         collate_fn=H5PytorchDataset.merge_samples_to_minibatch,\
                                         drop_last=drop_last)
         elif mode == "contact_map":
-            return torch.utils.data.DataLoader(ContactMapDataset(file_name, num_residue_fragments, atom),\
-                                        batch_size=batch_size, shuffle=True,\
+            return torch.utils.data.DataLoader(ContactMapDataset(file_name, num_residue_fragments, atom,\
+                                        self.padding), batch_size=batch_size, shuffle=True,\
                                         drop_last=drop_last)
 
     def get_new_test_data_loader(self, testing_file=None):

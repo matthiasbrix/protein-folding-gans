@@ -30,7 +30,8 @@ def get_model_data_dcgan(dataset):
             "batch_size": 8,
             "z_dim": 100,
             "one_sided_labeling": 1.0,
-            "g_updates": 1,
+            "g_updates": 2,
+            "padding": "no_pad",
             "optimizer_G": torch.optim.Adam,
             "optimizer_D": torch.optim.Adam,
             "optim_config_G": {

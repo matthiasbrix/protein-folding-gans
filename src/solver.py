@@ -126,6 +126,8 @@ class Training(object):
                     contact_map /= 100
                 elif self.solver.data_loader.residue_fragments == 128:
                     contact_map /= 100
+                else:
+                    raise ValueError("Scaling down went wrong!")
                 self._train_batch(epoch_metrics, contact_map)
 
 class Solver():
@@ -232,6 +234,7 @@ class Solver():
                 params += "atom: {}\n".format(self.data_loader.atom)
             params += "Max sequence length: {}\n".format(self.max_sequence_length)
             params += "training file: {}\n".format(self.data_loader.training_file)
+            params += "padding: {}\n".format(self.data_loader.padding)
             params += "g_updates: {}\n".format(self.g_updates)
             params += "one_sided_labeling: {}\n".format(self.one_sided_labeling)
             params += str(self.model)
@@ -312,7 +315,7 @@ if __name__ == "__main__":
             make_dirs=save_files)
         data_loader = DataLoader(directories, data["batch_size"], dataset_arg.lower(),
                         training_file=training_file, residue_fragments=residue_fragments,\
-                        atom="calpha")
+                        atom="calpha", padding=data["padding"])
         model = Dcgan(data_loader.input_dim, data["z_dim"])
         generator = Generator(data["z_dim"], res=residue_fragments)
         discriminator = Discriminator(1, 1, res=residue_fragments)
