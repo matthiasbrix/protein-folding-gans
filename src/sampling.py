@@ -34,7 +34,7 @@ def find_closest_gt(generator, z_dim, test_loader):
     # so each idx represents a generated map, and value is its ground truth closest map
     min_losses = [(0, 0.0, None, None) for _ in range(len(samples))]
     gt_maps = []
-    loss_func = torch.nn.MSELoss()
+    loss_func = torch.nn.MSELoss(reduction="sum")
     # on each contact map, iterate over the data set.
     for idx, generated_contact_map in enumerate(samples):
         losses = []
