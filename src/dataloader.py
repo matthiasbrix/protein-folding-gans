@@ -97,22 +97,23 @@ class DataLoader():
                 batch_size=self.batch_size, drop_last=True, shuffle=True)
         elif self.dataset.lower() == "proteins":
             self.train_loader = self._construct_dataloader_from_disk(train_set, self.batch_size,\
-                self.residue_fragments, atom=self.atom, drop_last=False)
+                self.residue_fragments, atom=self.atom, drop_last=False, padding=self.padding)
 
     def _construct_dataloader_from_disk(self, file_name, batch_size, num_residue_fragments,\
-                                        mode="contact_map", atom=None, drop_last=False):
+                                        mode="contact_map", atom=None, drop_last=False, padding="pwd_pad"):
         if mode == "protein":
             return torch.utils.data.DataLoader(H5PytorchDataset(file_name), batch_size=batch_size, shuffle=True,\
                                         collate_fn=H5PytorchDataset.merge_samples_to_minibatch,\
                                         drop_last=drop_last)
         elif mode == "contact_map":
-            return torch.utils.data.DataLoader(ContactMapDataset(file_name, num_residue_fragments, atom,\
-                                        self.padding), batch_size=batch_size, shuffle=True,\
-                                        drop_last=drop_last)
+            return torch.utils.data.DataLoader(ContactMapDataset(file_name, num_residue_fragments, atom, padding),\
+                                        batch_size=batch_size, shuffle=False, drop_last=drop_last)
 
-    def get_new_test_data_loader(self, testing_file=None):
+    def get_new_test_data_loader(self, testing_file=None, batch_size=None):
         if self.dataset.lower() == "mnist":
             test_set = datasets.MNIST(root=self.root, train=False, transform=transforms.ToTensor(), download=True)
             return torch.utils.data.DataLoader(dataset=test_set, batch_size=self.batch_size, shuffle=True, drop_last=True)
         elif self.dataset.lower() == "proteins":
-            return self._construct_dataloader_from_disk(testing_file, self.batch_size, self.residue_fragments, atom=self.atom, drop_last=False)
+            batch_size = batch_size if batch_size else self.batch_size
+            return self._construct_dataloader_from_disk(testing_file, batch_size,\
+                self.residue_fragments, atom=self.atom, drop_last=False)

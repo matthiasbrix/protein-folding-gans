@@ -56,7 +56,7 @@ def compute_contact_maps(residues, num_fragments_extract, fragment_length, paddi
                 pwd = pad_pwd(pwd, fragment_length)
             contact_maps[fragment_id] = pwd
         if padding == "no_pad":
-            if fragment.shape[0] < fragment_length:q
+            if fragment.shape[0] < fragment_length:
                 contact_maps = np.delete(contact_maps, fragment_id, 0)
             else:
                 pwd = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())

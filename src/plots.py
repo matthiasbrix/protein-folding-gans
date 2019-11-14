@@ -2,6 +2,7 @@ import numpy as np
 import torch
 import torchvision
 import matplotlib.pyplot as plt
+from matplotlib import gridspec
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -59,13 +60,21 @@ def contact_map_grid(ims, rows=None, cols=None, fill=True, showax=False, file_na
 
     if fill:
         bleed = 0
-        fig.subplots_adjust(left=bleed, bottom=bleed, right=(1 - bleed), top=(1 - bleed))
+        if rows == 1 and cols == 1:
+            fig.subplots_adjust(left=0.2, right=0.85, top=1.0, bottom=0.9)
+        else:
+            fig.subplots_adjust(left=bleed, bottom=bleed, right=(1 - bleed), top=(1 - bleed))
 
-    for ax, im in zip(axarr.ravel(), ims):
-        ax.imshow(im[0]) # assuming C, H, W
+    if rows == 1 and cols == 1:
+        axarr.imshow(ims[0])
         if not showax:
-            ax.set_axis_off()
-
+            axarr.set_axis_off()
+    else:
+        for ax, im in zip(axarr.ravel(), ims):
+            ax.imshow(im[0]) # assuming C, H, W
+            if not showax:
+                ax.set_axis_off()
+    
     if file_name and show:
         plt.show()
         fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
@@ -75,3 +84,24 @@ def contact_map_grid(ims, rows=None, cols=None, fill=True, showax=False, file_na
         plt.show()
     plt.close()
 
+def plot_grid(imgs, file_name, nrow=2, ncol=8):
+    fig = plt.figure(figsize=(ncol+1, nrow+1))
+
+    gs = gridspec.GridSpec(nrow, ncol,
+        wspace=0.0, hspace=0.0,
+        top=1.-0.5/(nrow+1), bottom=0.5/(nrow+1),
+        left=0.5/(ncol+1), right=1-0.5/(ncol+1))
+
+    idx = 0
+    for i in range(nrow):
+        for j in range(ncol):
+            im = imgs[idx][0] # expecting 1, H, W
+            ax = plt.subplot(gs[i, j])
+            ax.imshow(im)
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+            plt.axis("off")
+            idx += 1
+    plt.show()
+    if file_name:
+        fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
