@@ -2,11 +2,13 @@ import numpy as np
 import torch
 import torchvision
 import matplotlib.pyplot as plt
+from matplotlib import gridspec
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 DATASETS = {
-    "mnist": "MNIST"
+    "mnist": "MNIST",
+    "proteins": "Proteins"
 }
 
 def _xticks(ls, ticks_rate):
@@ -42,3 +44,64 @@ def plot_z_samples(gz, save_fig=False, result_dir=None, dataset=None):
     if save_fig:
         torchvision.utils.save_image(grid_img, result_dir +\
             "/plot_z_samples" + dataset + ".png")
+
+# https://stackoverflow.com/questions/53255432/saving-a-grid-of-heterogenous-images-in-python
+# useful/needed for contact maps
+def contact_map_grid(ims, rows=None, cols=None, fill=True, showax=False, file_name=None, show=False):
+    if rows is None != cols is None:
+        raise ValueError("Set either both rows and cols or neither.")
+
+    if rows is None:
+        rows = len(ims)
+        cols = 1
+
+    gridspec_kw = {'wspace': 0, 'hspace': 0} if fill else {}
+    fig, axarr = plt.subplots(rows, cols, gridspec_kw=gridspec_kw)
+
+    if fill:
+        bleed = 0
+        if rows == 1 and cols == 1:
+            fig.subplots_adjust(left=0.2, right=0.85, top=1.0, bottom=0.9)
+        else:
+            fig.subplots_adjust(left=bleed, bottom=bleed, right=(1 - bleed), top=(1 - bleed))
+
+    if rows == 1 and cols == 1:
+        axarr.imshow(ims[0])
+        if not showax:
+            axarr.set_axis_off()
+    else:
+        for ax, im in zip(axarr.ravel(), ims):
+            ax.imshow(im[0]) # assuming C, H, W
+            if not showax:
+                ax.set_axis_off()
+    
+    if file_name and show:
+        plt.show()
+        fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
+    elif file_name:
+        fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
+    else:
+        plt.show()
+    plt.close()
+
+def plot_grid(imgs, file_name, nrow=2, ncol=8):
+    fig = plt.figure(figsize=(ncol+1, nrow+1))
+
+    gs = gridspec.GridSpec(nrow, ncol,
+        wspace=0.0, hspace=0.0,
+        top=1.-0.5/(nrow+1), bottom=0.5/(nrow+1),
+        left=0.5/(ncol+1), right=1-0.5/(ncol+1))
+
+    idx = 0
+    for i in range(nrow):
+        for j in range(ncol):
+            im = imgs[idx][0] # expecting 1, H, W
+            ax = plt.subplot(gs[i, j])
+            ax.imshow(im)
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+            plt.axis("off")
+            idx += 1
+    plt.show()
+    if file_name:
+        fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
