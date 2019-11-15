@@ -99,7 +99,7 @@ class Training(object):
     def _train_batch(self, epoch_metrics, x):
         x = x.to(DEVICE)
         batch_size = x.shape[0]
-        # Sample noise as generator input, N x 100 x res x res
+        # Sample noise as generator input, N x 100 x 1 x 1
         z = torch.randn((batch_size, self.solver.model.z_dim, 1, 1)).to(DEVICE)
         # Generate a batch of images
         gz = self.solver.generator(z)
