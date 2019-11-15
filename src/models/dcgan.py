@@ -17,7 +17,7 @@ class Generator(nn.Module):
                 nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1), # TODO: added....
                 nn.BatchNorm2d(256),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 128, 4, stride=4, padding=0),
+                nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
                 nn.BatchNorm2d(128),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
@@ -99,6 +99,7 @@ class Generator(nn.Module):
         print(gz.shape)
         #exit(1)'''
         gz = self.layers(z)
+        print("gz", gz.shape)
         return gz
 
 # rep the prob that x from the data rather than p_g
@@ -200,7 +201,9 @@ class Discriminator(nn.Module):
         # TODO: Try also other dimensions on this one...
         # expects 4-D - N x C x H x W
         #exit(1)'''
-        return self.layers(x)
+        out = self.layers(x)
+        print("test", out.shape)
+        return out
 
 class Dcgan(nn.Module):
     def __init__(self, input_dim, z_dim):
