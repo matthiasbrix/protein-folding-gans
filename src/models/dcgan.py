@@ -3,6 +3,9 @@ import torch
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
+# TODO: (H - K + 2P) / S + 1 = (64 - 4  +  4)/ 2 = 32
+# 64 - 5 + 4 / 1 + 1 = 64
+# TODO: increase capacity by adding layer with same channels and same convolution on the 64x64 and 4x4 layers.
 class Generator(nn.Module):
     def __init__(self, nz, res=16):
         super(Generator, self).__init__()
@@ -11,16 +14,22 @@ class Generator(nn.Module):
                 nn.ConvTranspose2d(nz, 512, 4, stride=4, padding=0),
                 nn.BatchNorm2d(512),
                 nn.LeakyReLU(0.2),
+                nn.ConvTranspose2d(512, 512, 5, stride=1, padding=2), # TODO: added here
+                nn.BatchNorm2d(512),
+                nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1),
                 nn.BatchNorm2d(256),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1), # TODO: added....
+                nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1),
                 nn.BatchNorm2d(256),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
                 nn.BatchNorm2d(128),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
+                nn.BatchNorm2d(64),
+                nn.LeakyReLU(0.2),
+                nn.ConvTranspose2d(64, 64, 5, stride=1, padding=2), # TODO: added here...
                 nn.BatchNorm2d(64),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1)
@@ -99,7 +108,7 @@ class Generator(nn.Module):
         print(gz.shape)
         #exit(1)'''
         gz = self.layers(z)
-        print("gz", gz.shape)
+        #print("gz", gz.shape)
         return gz
 
 # rep the prob that x from the data rather than p_g
@@ -110,6 +119,9 @@ class Discriminator(nn.Module):
         if res == 128:
             self.layers = nn.Sequential(
                 nn.Conv2d(din, 64, 4, stride=2, padding=1),
+                nn.LeakyReLU(0.2),
+                nn.Dropout(0.1),
+                nn.Conv2d(64, 64, 5, stride=1, padding=2), # TODO: added
                 nn.LeakyReLU(0.2),
                 nn.Dropout(0.1),
                 nn.Conv2d(64, 128, 4, stride=2, padding=1),
@@ -126,6 +138,9 @@ class Discriminator(nn.Module):
                 nn.Dropout(0.1),
                 nn.Conv2d(256, 512, 4, stride=2, padding=1),
                 nn.BatchNorm2d(512),
+                nn.LeakyReLU(0.2),
+                nn.Dropout(0.1),
+                nn.Conv2d(512, 512, 5, stride=1, padding=2),  # TODO: added
                 nn.LeakyReLU(0.2),
                 nn.Dropout(0.1),
                 nn.Conv2d(512, dout, 4, stride=1, padding=0),
@@ -201,8 +216,9 @@ class Discriminator(nn.Module):
         # TODO: Try also other dimensions on this one...
         # expects 4-D - N x C x H x W
         #exit(1)'''
+        #print(x.shape)
         out = self.layers(x)
-        print("test", out.shape)
+        #print("test", out.shape)
         return out
 
 class Dcgan(nn.Module):
