@@ -11,22 +11,16 @@ class Generator(nn.Module):
                 nn.ConvTranspose2d(nz, 512, 4, stride=4, padding=0),
                 nn.BatchNorm2d(512),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(512, 512, 5, stride=1, padding=2), # TODO: added here
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1),
                 nn.BatchNorm2d(256),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1),
+                nn.ConvTranspose2d(256, 256, 4, stride=2, padding=1), # TODO: added....
                 nn.BatchNorm2d(256),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
                 nn.BatchNorm2d(128),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(64, 64, 5, stride=1, padding=2), # TODO: added here...
                 nn.BatchNorm2d(64),
                 nn.LeakyReLU(0.2),
                 nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1)
