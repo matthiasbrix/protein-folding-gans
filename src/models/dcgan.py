@@ -40,19 +40,19 @@ class Generator(nn.Module):
             )
         else:
             self.layers = nn.Sequential(
-                nn.ConvTranspose2d(nz, 512, 4, stride=1, padding=0), # 16 x 16 => 19, 19
+                nn.ConvTranspose2d(nz, 512, 4, stride=1, padding=0),
                 nn.BatchNorm2d(512),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(512, 256, 3, stride=1, padding=1), # 19 x 19
+                nn.ConvTranspose2d(512, 256, 3, stride=1, padding=1),
                 nn.BatchNorm2d(256),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1), # 38 x 38
+                nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
                 nn.BatchNorm2d(128),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1), # 76 x 76
+                nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
                 nn.BatchNorm2d(64),
                 nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(64, 1, 3, stride=1, padding=1) # 76 x 76
+                nn.ConvTranspose2d(64, 1, 3, stride=1, padding=1)
             )
 
     def forward(self, z):
@@ -136,9 +136,3 @@ class Dcgan(nn.Module):
         self.z_dim = z_dim
         self.input_dim = input_dim
         self.loss = nn.BCELoss()
-
-    def kl_divergence_z(self, z):
-        mean = torch.mean(z)
-        variance = torch.var(z) # \sigma^2
-        kl_divergence = 1/2 * torch.sum(1 + variance.log() - mean.pow(2) - variance)
-        return kl_divergence

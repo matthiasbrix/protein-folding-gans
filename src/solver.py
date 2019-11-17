@@ -27,30 +27,64 @@ class EpochMetrics():
         self.d_loss_acc += d_loss
 
 class Testing(object):
-    def __init__(self, solver):
-        self.solver = solver
+    def __init__(self, generator, z_dim, optimizer_G, test_loader, path,\
+        steps=3000, step_size=10, gamma=0.97):
+        self.generator = generator
+        self.z_dim = z_dim
+        self.test_loss = torch.nn.MSELoss()
+        self.optimizer_G = optimizer_G
+        self.test_loader = test_loader
+        self.mse_loss = 0.0
+        self.kl_loss = 0.0
+        self.path = path
+        self.steps = steps
+        self.steps_taken = 0
+        self.step_size = step_size
+        self.gamma = gamma
+
+    def kl_divergence_z(self, z):
+        mean = torch.mean(z)
+        variance = torch.var(z)
+        kl_divergence = 1/2 * (variance + mean.pow(2) - 1 - variance.log())
+        return kl_divergence
 
     # testing the "complexity" of the GAN as defined by Anand and Huang, supplementary material
     # find a z such that G(z) \in x
-    def _test_batch(self, x, optimizer_G):
+    def _test_batch(self, x):
         batch_size = x.shape[0]
-        z = torch.randn((batch_size, self.solver.model.z_dim, 1, 1)).to(DEVICE)
-        gz = self.solver.generator(z)
+        z = torch.randn((batch_size, self.z_dim, 1, 1)).to(DEVICE)
+        gz = self.generator(z)
         # no clamping/symmetric operations as that is done only during training!
         # ||G(z) - x||_2 + \gamma D_{KL}[N(\mu(z), \sigma^2(z))||N(0,1)]
-        loss = self.solver.model.loss(gz, x) + 10*self.solver.model.kl_divergence_z(gz)
+        mse = self.test_loss(gz, x)
+        kl = 10*self.kl_divergence_z(gz)
+        loss = mse + kl
         loss.backward()
-        optimizer_G.step()
+        self.optimizer_G.step()
+        self.mse_loss = mse.item()
+        self.kl_loss = kl.item()
+        self.steps_taken += 1
 
-    def test(self, optimizer_G, test_loader, epochs=3000, step_size=10, gamma=0.97):
+    def test(self):
         print("Testing complexity of the GAN")
-        scheduler = torch.optim.lr_scheduler.StepLR(optimizer_G, step_size=step_size, gamma=gamma)
-        self.solver.generator.train()
-        for _ in range(epochs):
-            for _, test_batch in enumerate(test_loader):
+        scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer_G, step_size=self.step_size, gamma=self.gamma)
+        self.generator.train()
+        epoch = 1
+        while(True):
+            self.mse_loss = 0.0
+            self.kl_loss = 0.0
+            for _, test_batch in enumerate(self.test_loader):
                 contact_map = test_batch
-                self._test_batch(contact_map, optimizer_G)
+                self._test_batch(contact_map)
+                if self.steps_taken >= self.steps:
+                    break
                 scheduler.step()
+            print("====> Epoch/Steps: {}/{} mse {:.4f} kl {:.4f}".format(
+                epoch, self.steps_taken, self.mse_loss/len(self.test_loader),\
+                self.kl_loss/10/len(self.test_loader)))
+            # save the model here
+            torch.save(self.generator.state_dict(), self.path)
+            epoch += 1
 
 class Training(object):
     def __init__(self, solver):
