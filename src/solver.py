@@ -57,31 +57,32 @@ class Testing(object):
         # no clamping/symmetric operations as that is done only during training!
         # ||G(z) - x||_2 + \gamma D_{KL}[N(\mu(z), \sigma^2(z))||N(0,1)]
         mse = self.test_loss(gz, x)
-        kl = 10*self.kl_divergence_z(gz)
-        loss = mse + kl
+        kl = self.kl_divergence_z(gz)
+        loss = mse + 10*kl
         loss.backward()
         self.optimizer_G.step()
-        self.mse_loss = mse.item()
-        self.kl_loss = kl.item()
+        self.mse_loss += mse.item()
+        self.kl_loss += kl.item()
         self.steps_taken += 1
 
     def test(self):
-        print("Testing complexity of the GAN")
+        print("Testing complexity of the GAN, steps: {}".format(self.steps))
         scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer_G, step_size=self.step_size, gamma=self.gamma)
         self.generator.train()
         epoch = 1
-        while(True):
+        run_while = True
+        while(run_while):
             self.mse_loss = 0.0
             self.kl_loss = 0.0
             for _, test_batch in enumerate(self.test_loader):
                 contact_map = test_batch
                 self._test_batch(contact_map)
                 if self.steps_taken >= self.steps:
-                    break
+                    run_while = False
                 scheduler.step()
             print("====> Epoch/Steps: {}/{} mse {:.4f} kl {:.4f}".format(
                 epoch, self.steps_taken, self.mse_loss/len(self.test_loader),\
-                self.kl_loss/10/len(self.test_loader)))
+                self.kl_loss/len(self.test_loader)))
             # save the model here
             torch.save(self.generator.state_dict(), self.path)
             epoch += 1
