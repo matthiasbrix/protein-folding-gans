@@ -107,7 +107,7 @@ class DataLoader():
                                         drop_last=drop_last)
         elif mode == "contact_map":
             return torch.utils.data.DataLoader(ContactMapDataset(file_name, num_residue_fragments, atom, padding),\
-                                        batch_size=batch_size, shuffle=False, drop_last=drop_last)
+                                        batch_size=batch_size, shuffle=True, drop_last=drop_last)
 
     def get_new_test_data_loader(self, testing_file=None, batch_size=None):
         if self.dataset.lower() == "mnist":
