@@ -13,7 +13,7 @@ import Bio.PDB
 import math
 import numpy as np
 import time
-import pnerf as pnerf # TODO: import pnrf.pnerf
+import pnerf.pnerf as pnerf
 
 AA_ID_DICT = {'A': 1, 'C': 2, 'D': 3, 'E': 4, 'F': 5, 'G': 6, 'H': 7, 'I': 8, 'K': 9,
               'L': 10, 'M': 11, 'N': 12, 'P': 13, 'Q': 14, 'R': 15, 'S': 16, 'T': 17,

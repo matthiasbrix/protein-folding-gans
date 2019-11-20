@@ -6,7 +6,7 @@ DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 class Generator(nn.Module):
     def __init__(self, nz, res=16):
         super(Generator, self).__init__()
-        if res == 128:
+        if res >= 128:
             self.layers = nn.Sequential(
                 nn.ConvTranspose2d(nz, 512, 4, stride=4, padding=0),
                 nn.BatchNorm2d(512),
@@ -65,7 +65,7 @@ class Generator(nn.Module):
 class Discriminator(nn.Module):
     def __init__(self, din, dout, res=16):
         super(Discriminator, self).__init__()
-        if res == 128:
+        if res >= 128:
             self.layers = nn.Sequential(
                 nn.Conv2d(din, 64, 4, stride=2, padding=1),
                 nn.LeakyReLU(0.2),
