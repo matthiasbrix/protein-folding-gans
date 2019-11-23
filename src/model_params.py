@@ -26,7 +26,7 @@ def get_model_data_gan(dataset):
 def get_model_data_dcgan(dataset):
     if dataset.lower() == "proteins":
         params = {
-            "epochs": 50,
+            "epochs": 1000,
             "batch_size": 8,
             "z_dim": 100,
             "one_sided_labeling": 1.0,
