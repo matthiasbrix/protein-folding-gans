@@ -3,100 +3,189 @@ import torch.nn as nn
 
 from functools import partial
 
+"""
+
+Inspired by https://github.com/FrancescoSaverioZuppichini/ResNet
+
+"""
+
+DISCRIMINATOR = False
+
 class Conv2dAuto(nn.Conv2d):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.padding = (self.kernel_size[0] // 2, self.kernel_size[1] // 2) # dynamic add padding based on the kernel_size
 
+class ConvTranspose2dAuto(nn.ConvTranspose2d):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.padding = (self.kernel_size[0] // 2, self.kernel_size[1] // 2) # dynamic add padding based on the kernel_size
+
 conv3x3 = partial(Conv2dAuto, kernel_size=3, bias=False)
-conv = conv3x3(in_channels=32, out_channels=64)
+convt3x3 = partial(ConvTranspose2dAuto, kernel_size=3, bias=False)
 
-def activation_func(activation):
-    print("her", activation)
-    return  nn.ModuleDict([
-        ['relu', nn.ReLU(inplace=True)],
-        ['leaky_relu', nn.LeakyReLU(negative_slope=0.01, inplace=True)],
-        ['selu', nn.SELU(inplace=True)],
-        ['none', nn.Identity()]
-    ])[activation]
-
-# The residual block takes an input with in_channels, applies some blocks of convolutional layers
+# The residual block takes an input with in_channels, 
+# applies some blocks of convolutional layers
 # to reduce it to out_channels and sum it up to the original input
 # If their sizes mismatch, then the input goes into an identity
 class ResidualBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, activation='relu'):
+    def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.in_channels, self.out_channels, self.activation = in_channels, out_channels, activation
+        self.in_channels, self.out_channels = in_channels, out_channels
         self.blocks = nn.Identity()
-        self.activate = activation_func(activation)
+        self.activate = nn.LeakyReLU(0.2)
         self.shortcut = nn.Identity()
+        self.dropout = nn.Dropout(0.1)
     
     def forward(self, x):
         residual = x
         if self.should_apply_shortcut:
             residual = self.shortcut(x)
-        x = self.blocks(x)
-        print(x, self.should_apply_shortcut)
-        x += residual
-        print(x)
-        x = self.activate(x)
-        print(x)
+        x = self.blocks(x) # F(x)
+        x += residual # x
+        x = self.activate(x) # sigma(F(x) + x)
+        x = self.dropout(x) if DISCRIMINATOR else x # added just for disc
         return x
     
     @property
     def should_apply_shortcut(self):
         return self.in_channels != self.out_channels
 
-class ResNetResidualBlock(ResidualBlock):
-    def __init__(self, in_channels, out_channels, expansion=1, downsampling=1, conv=conv3x3, *args, **kwargs):
+class GeneratorResNetResidualBlock(ResidualBlock):
+    def __init__(self, in_channels, out_channels, downsampling=1, expansion=1, convt=convt3x3, *args, **kwargs):
         super().__init__(in_channels, out_channels, *args, **kwargs)
-        self.expansion, self.downsampling, self.conv = expansion, downsampling, conv
+        # Is actually upsamlping not downsampling!
+        self.downsampling, self.expansion = downsampling, expansion
+        self.convt = convt
+        # same convolution on the shortcuts
         self.shortcut = nn.Sequential(
-            nn.Conv2d(self.in_channels, self.expanded_channels, kernel_size=1,
-                      stride=self.downsampling, bias=False),
-            nn.BatchNorm2d(self.expanded_channels)) if self.should_apply_shortcut else None
-        
+            nn.ConvTranspose2d(self.in_channels, self.expanded_channels,\
+                    kernel_size=1, stride=self.downsampling, bias=False),
+            nn.BatchNorm2d(self.expanded_channels)
+        ) if self.should_apply_shortcut else None
+
     @property
     def expanded_channels(self):
         return self.out_channels * self.expansion
-    
+
+class DiscriminatorResNetResidualBlock(ResidualBlock):
+    def __init__(self, in_channels, out_channels, downsampling=1, expansion=1, conv=conv3x3, *args, **kwargs):
+        super().__init__(in_channels, out_channels, *args, **kwargs)
+        self.downsampling, self.expansion = downsampling, expansion
+        self.conv = conv
+        # same convolution on the shortcuts
+        self.shortcut = nn.Sequential(
+            nn.Conv2d(self.in_channels, self.expanded_channels, kernel_size=1,
+                      stride=self.downsampling, bias=False)
+        ) if self.should_apply_shortcut else None
+
     @property
-    def should_apply_shortcut(self):
-        return self.in_channels != self.expanded_channels
+    def expanded_channels(self):
+        return self.out_channels * self.expansion
 
-
-def conv_bn(in_channels, out_channels, conv, *args, **kwargs):
-    return nn.Sequential(conv(in_channels, out_channels, *args, **kwargs), nn.BatchNorm2d(out_channels))
-
-class ResNetBasicBlock(ResNetResidualBlock):
-    """
-    Basic ResNet block composed by two layers of 3x3conv/batchnorm/activation
-    """
+class GeneratorResNetBasicBlock(GeneratorResNetResidualBlock):
     expansion = 1
     def __init__(self, in_channels, out_channels, *args, **kwargs):
         super().__init__(in_channels, out_channels, *args, **kwargs)
         self.blocks = nn.Sequential(
-            conv_bn(self.in_channels, self.out_channels, conv=self.conv, bias=False, stride=self.downsampling),
-            activation_func(self.activation),
-            conv_bn(self.out_channels, self.expanded_channels, conv=self.conv, bias=False),
+            self.convt_bn(self.in_channels, self.out_channels, bias=False, stride=self.downsampling),
+            self.activate,
+            self.convt_bn(self.out_channels, self.expanded_channels, bias=False),
+        )
+
+    def convt_bn(self, in_channels, out_channels, *args, **kwargs):
+        return nn.Sequential(
+            self.convt(in_channels, out_channels, *args, **kwargs),
+            nn.BatchNorm2d(out_channels)
+        )
+
+class DiscriminatorResNetBasicBlock(DiscriminatorResNetResidualBlock):
+    expansion = 1
+    def __init__(self, in_channels, out_channels, *args, **kwargs):
+        super().__init__(in_channels, out_channels, *args, **kwargs)
+        self.blocks = nn.Sequential(
+            self.convolution(self.in_channels, self.out_channels, bias=False, stride=self.downsampling),
+            self.activate,
+            nn.Dropout(0.2),
+            self.convolution(self.out_channels, self.expanded_channels, bias=False)
+        )
+
+    def convolution(self, in_channels, out_channels, *args, **kwargs):
+        return self.conv(in_channels, out_channels, *args, **kwargs)
+
+class ResNetLayer(nn.Module):
+    def __init__(self, in_channels, out_channels, block, n=1, *args, **kwargs):
+        super().__init__()
+        # We perform up/downsampling directly by convolutional layers that have a stride of 2.
+        downsampling = 2 if in_channels != out_channels else 1
+        self.blocks = nn.Sequential(
+            block(in_channels, out_channels, *args, **kwargs, downsampling=downsampling),
+            *[block(out_channels * block.expansion,
+                    out_channels, downsampling=1, *args, **kwargs) for _ in range(n - 1)]
+        )
+
+    def forward(self, x):
+        x = self.blocks(x)
+        return x
+
+class ResGenNet(nn.Module):
+    def __init__(self, z_dim, n):
+        super(ResGenNet, self).__init__()
+        self.first_gen_layer = nn.Sequential(
+            nn.ConvTranspose2d(z_dim, 1024, 3, stride=2),
+            nn.BatchNorm2d(1024),
+            nn.LeakyReLU(0.2)
+        )
+        self.gen_layers = nn.Sequential(
+            ResNetLayer(1024, 512, GeneratorResNetBasicBlock, n=n),
+            ResNetLayer(512, 256, GeneratorResNetBasicBlock, n=n),
+            ResNetLayer(256, 128, GeneratorResNetBasicBlock, n=n),
+            ResNetLayer(128, 64, GeneratorResNetBasicBlock, n=n),
+            ResNetLayer(64, 32, GeneratorResNetBasicBlock, n=n),
+            ResNetLayer(32, 16, GeneratorResNetBasicBlock, n=n),
+            ResNetLayer(16, 1, GeneratorResNetBasicBlock, n=n)
+        ) # 7 gen layers
+        self.last_gen_layer = nn.Sequential(
+            nn.Conv2d(1, 1, 2, 1, padding=0) # reduce by 1 pixel because we get to 257x257
         )
     
-# TODO: 1. read article of ultra deep (focus on residual block/archs)
-# TODO: 2. read DESTINI article (focus on residual blocks/archs)
-# TODO: 3 try implementing an architecture...
+    def forward(self, z):
+        gz = self.first_gen_layer(z)
+        gz = self.gen_layers(gz)
+        gz = self.last_gen_layer(gz)
+        return gz
 
-if __name__ == "__main__":
-    a = ResidualBlock(32, 64)
-    print("a", a)
-    dummy = torch.ones((1, 1, 1, 1))
-    dummy += 5
-    block = ResidualBlock(1, 64)
-    res = block(dummy)
-    print("result!", res)
-    asd = ResNetResidualBlock(32, 64)
-    print(asd)
-    dummy = torch.ones((1, 32, 224, 224))
-    block = ResNetBasicBlock(32, 64)
-    res = block(dummy).shape
-    print(block)
-    print(res)
+class ResDiscNet(nn.Module):
+    def __init__(self, n):
+        super(ResDiscNet, self).__init__()
+        # discriminator first and last layer
+        self.first_disc_layer = nn.Sequential(
+            nn.Conv2d(1, 64, 3, stride=2),
+            nn.LeakyReLU(0.2),
+            nn.Dropout(0.1)
+        )
+        self.disc_layers = nn.Sequential(
+            ResNetLayer(1, 16, DiscriminatorResNetBasicBlock, n=n),
+            ResNetLayer(16, 32, DiscriminatorResNetBasicBlock, n=n),
+            ResNetLayer(32, 64, DiscriminatorResNetBasicBlock, n=n),
+            ResNetLayer(64, 128, DiscriminatorResNetBasicBlock, n=n),
+            ResNetLayer(128, 256, DiscriminatorResNetBasicBlock, n=n),
+            ResNetLayer(256, 512, DiscriminatorResNetBasicBlock, n=n),
+            ResNetLayer(512, 1024, DiscriminatorResNetBasicBlock, n=n)
+        )
+        self.last_disc_layer = nn.Sequential(
+            nn.Conv2d(1024, 1, 1, stride=2, padding=0), # reduce by 1 pixel.
+            nn.Sigmoid()
+        )
+
+    def forward(self, gz):
+        d = self.disc_layers(gz) # 2 x 2
+        d = self.last_disc_layer(d) # 1 x 1
+        return d
+
+class ResNet(nn.Module):
+    def __init__(self, input_dim, z_dim):
+        super(ResNet, self).__init__()
+        self.z_dim = z_dim
+        self.input_dim = input_dim
+        self.loss = nn.BCELoss()

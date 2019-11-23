@@ -5,8 +5,10 @@ import torch
 import torch.utils.data
 import torchvision
 
+import models.resnet
 from models.gan import Gan, Generator, Discriminator
 from models.dcgan import Dcgan, Generator, Discriminator
+from models.resnet import ResNet, ResGenNet, ResDiscNet
 from model_params import get_model_data_gan, get_model_data_dcgan
 from directories import Directories
 from dataloader import DataLoader
@@ -96,6 +98,9 @@ class Training(object):
         for i in range(self.solver.g_updates):
             self.solver.optimizer_G.zero_grad()
             dgz = self.solver.discriminator(gz)
+            _, _, H, W = dgz.shape
+            assert H == 1
+            assert W == 1
             real = torch.ones_like(dgz).to(DEVICE)
             # Loss measures generator's ability to fool the discriminator
             # minimizing the log of the inverted probability of the discriminator’s prediction of fake images
@@ -103,7 +108,7 @@ class Training(object):
             if i == (self.solver.g_updates-1):
                 g_loss.backward()
             else:
-                g_loss.backward(retain_graph=True)
+                g_loss.backward(retain_graph=True) # is needed to accumulate graph for next run
             loss += g_loss.item()
             self.solver.optimizer_G.step()
         return loss/self.solver.g_updates
@@ -116,11 +121,17 @@ class Training(object):
         x.unsqueeze_(1)
         # real
         dx = self.solver.discriminator(x)
+        _, _, H, W = dx.shape
+        assert H == 1
+        assert W == 1
         real = torch.FloatTensor([self.solver.one_sided_labeling]).repeat(x.shape[0]).to(DEVICE) # ONE SIDED LABELING
         real_loss = self.solver.model.loss(dx.reshape(-1).to(DEVICE), real)
         real_loss.backward()
         # fake
         dgz = self.solver.discriminator(gz)
+        _, _, H, W = dgz.shape
+        assert H == 1
+        assert W == 1
         fake = torch.zeros_like(dgz).to(DEVICE)
         fake_loss = self.solver.model.loss(dgz, fake)
         fake_loss.backward()
@@ -138,9 +149,14 @@ class Training(object):
         z = torch.randn((batch_size, self.solver.model.z_dim, 1, 1)).to(DEVICE)
         # Generate a batch of images
         gz = self.solver.generator(z)
+        _, _, H, W = gz.shape
+        assert H == self.solver.data_loader.img_dims[0]
+        assert W == self.solver.data_loader.img_dims[1]
         gz = torch.clamp(gz, min=0.001) # clamp values above zero to ensure positive values
         # settings symmetric here because contact map is only distance to subsequent residues
         gz = (gz + gz.transpose(3, 2))/2 # set symmetric, transpose only spatial dims
+        if isinstance(self.solver.discriminator, ResDiscNet):
+            models.resnet.DISCRIMINATOR = True
         d_loss_real, d_loss_fake, d_loss = self._train_discriminator(x, gz.detach())
         g_loss = self._train_generator(gz)
         epoch_metrics.compute_batch_train_metrics(g_loss, d_loss_real, d_loss_fake, d_loss)
@@ -159,7 +175,7 @@ class Training(object):
                     contact_map /= 10
                 elif self.solver.data_loader.residue_fragments == 64:
                     contact_map /= 100
-                elif self.solver.data_loader.residue_fragments == 128:
+                elif self.solver.data_loader.residue_fragments >= 128:
                     contact_map /= 100
                 else:
                     raise ValueError("Scaling down went wrong!")
@@ -242,6 +258,7 @@ class Solver():
                     + "_z=" + str(self.model.z_dim) + ".png", nrow=10, normalize=True)
             elif self.data_loader.dataset == "proteins":
                 imgs, rows, cols = self.get_sample_stats()
+                # dcgan sampling is the same for resnet
                 sample = dcgan_sampling(self.generator, self.model.z_dim, num_samples).cpu()
                 contact_map_grid(sample[:imgs], rows=rows, cols=cols, fill=True,\
                     file_name=self.data_loader.directories.result_dir\
@@ -351,9 +368,13 @@ if __name__ == "__main__":
         data_loader = DataLoader(directories, data["batch_size"], dataset_arg.lower(),
                         training_file=training_file, residue_fragments=residue_fragments,\
                         atom="calpha", padding=data["padding"])
-        model = Dcgan(data_loader.input_dim, data["z_dim"])
-        generator = Generator(data["z_dim"], res=residue_fragments)
-        discriminator = Discriminator(1, 1, res=residue_fragments)
+        #model = Dcgan(data_loader.input_dim, data["z_dim"])
+        #generator = Generator(data["z_dim"], res=residue_fragments)
+        #discriminator = Discriminator(1, 1, res=residue_fragments)
+        n = 5
+        model = ResNet(data_loader.input_dim, data["z_dim"])
+        generator = ResGenNet(data["z_dim"], n)
+        discriminator = ResDiscNet(n)
     solver = Solver(model, generator, discriminator, data["epochs"], data_loader, data["optimizer_G"],
                     data["optimizer_D"], data["optim_config_G"], data["optim_config_D"], max_sequence_length,\
                     data["one_sided_labeling"], data["g_updates"], save_model_state=save_model_state)
