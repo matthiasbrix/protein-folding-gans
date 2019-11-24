@@ -6,11 +6,11 @@ import h5py
 import contact_maps
 
 class ContactMapDataset(torch.utils.data.Dataset):
-    def __init__(self, file_name, num_residue_fragments, atom, padding):
+    def __init__(self, file_name, num_residue_fragments, atom, padding, test_pdb):
         super(ContactMapDataset, self).__init__()
         # property that reads in the contact maps from the given file name (and residue length)
         # in format batch_size x residue_length x residue_length
-        self.contact_maps = contact_maps.get_contact_maps(file_name, num_residue_fragments, atom, padding)
+        self.contact_maps = contact_maps.get_contact_maps(file_name, num_residue_fragments, atom, padding, test_pdb)
 
     def __getitem__(self, index):
         return self.contact_maps[index]
@@ -26,8 +26,8 @@ class H5PytorchDataset(torch.utils.data.Dataset):
         self.num_proteins, self.max_sequence_len = self.h5pyfile['primary'].shape
 
     def __getitem__(self, index):
-        mask = torch.Tensor(self.h5pyfile['mask'][index,:]).type(dtype=torch.uint8)
-        prim = torch.masked_select(torch.Tensor(self.h5pyfile['primary'][index,:]).type(dtype=torch.long), mask)
+        mask = torch.Tensor(self.h5pyfile['mask'][index, :]).type(dtype=torch.uint8)
+        prim = torch.masked_select(torch.Tensor(self.h5pyfile['primary'][index, :]).type(dtype=torch.long), mask)
         tertiary = torch.Tensor(self.h5pyfile['tertiary'][index][:int(mask.sum())]) # max length x 9
         return prim, tertiary, mask
 
@@ -100,20 +100,21 @@ class DataLoader():
                 self.residue_fragments, atom=self.atom, drop_last=False, padding=self.padding)
 
     def _construct_dataloader_from_disk(self, file_name, batch_size, num_residue_fragments,\
-                                        mode="contact_map", atom=None, drop_last=False, padding="pwd_pad"):
+                                        mode="contact_map", atom=None, drop_last=False, padding="pwd_pad",\
+                                        test_pdb=False):
         if mode == "protein":
             return torch.utils.data.DataLoader(H5PytorchDataset(file_name), batch_size=batch_size, shuffle=True,\
                                         collate_fn=H5PytorchDataset.merge_samples_to_minibatch,\
                                         drop_last=drop_last)
         elif mode == "contact_map":
-            return torch.utils.data.DataLoader(ContactMapDataset(file_name, num_residue_fragments, atom, padding),\
-                                        batch_size=batch_size, shuffle=True, drop_last=drop_last)
+            return torch.utils.data.DataLoader(ContactMapDataset(file_name, num_residue_fragments, atom, padding,\
+                                        test_pdb=test_pdb), batch_size=batch_size, shuffle=True, drop_last=drop_last)
 
-    def get_new_test_data_loader(self, testing_file=None, batch_size=None):
+    def get_new_test_data_loader(self, testing_file=None, batch_size=None, padding="pwd_pad", test_pdb=False):
         if self.dataset.lower() == "mnist":
             test_set = datasets.MNIST(root=self.root, train=False, transform=transforms.ToTensor(), download=True)
             return torch.utils.data.DataLoader(dataset=test_set, batch_size=self.batch_size, shuffle=True, drop_last=True)
         elif self.dataset.lower() == "proteins":
             batch_size = batch_size if batch_size else self.batch_size
             return self._construct_dataloader_from_disk(testing_file, batch_size,\
-                self.residue_fragments, atom=self.atom, drop_last=False)
+                self.residue_fragments, atom=self.atom, drop_last=False, padding=padding, test_pdb=test_pdb)
