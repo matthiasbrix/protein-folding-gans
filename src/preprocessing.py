@@ -55,9 +55,9 @@ def process_file(input_file, output_file, use_gpu, testing):
     f = h5py.File(output_file, 'w')
     current_buffer_size = 1
     current_buffer_allocation = 0
-    dset1 = f.create_dataset('primary',(current_buffer_size,MAX_SEQUENCE_LENGTH),maxshape=(None,MAX_SEQUENCE_LENGTH),dtype='int32')
-    dset2 = f.create_dataset('tertiary',(current_buffer_size,MAX_SEQUENCE_LENGTH,9),maxshape=(None,MAX_SEQUENCE_LENGTH, 9),dtype='float')
-    dset3 = f.create_dataset('mask',(current_buffer_size,MAX_SEQUENCE_LENGTH),maxshape=(None,MAX_SEQUENCE_LENGTH),dtype='uint8')
+    dset1 = f.create_dataset('primary',(current_buffer_size, MAX_SEQUENCE_LENGTH), maxshape=(None, MAX_SEQUENCE_LENGTH), dtype='int32')
+    dset2 = f.create_dataset('tertiary',(current_buffer_size, MAX_SEQUENCE_LENGTH,9), maxshape=(None, MAX_SEQUENCE_LENGTH, 9), dtype='float')
+    dset3 = f.create_dataset('mask', (current_buffer_size, MAX_SEQUENCE_LENGTH), maxshape=(None, MAX_SEQUENCE_LENGTH), dtype='uint8')
 
     if testing:
         input_files = glob.glob("../data/proteins/raw/testing_files/*")
@@ -83,9 +83,9 @@ def process_file(input_file, output_file, use_gpu, testing):
 
             if current_buffer_allocation >= current_buffer_size:
                 current_buffer_size = current_buffer_size + 1
-                dset1.resize((current_buffer_size,MAX_SEQUENCE_LENGTH))
-                dset2.resize((current_buffer_size,MAX_SEQUENCE_LENGTH, 9))
-                dset3.resize((current_buffer_size,MAX_SEQUENCE_LENGTH))
+                dset1.resize((current_buffer_size, MAX_SEQUENCE_LENGTH))
+                dset2.resize((current_buffer_size, MAX_SEQUENCE_LENGTH, 9))
+                dset3.resize((current_buffer_size, MAX_SEQUENCE_LENGTH))
 
             primary_padded = np.zeros(MAX_SEQUENCE_LENGTH)
             tertiary_padded = np.zeros((9, MAX_SEQUENCE_LENGTH))
