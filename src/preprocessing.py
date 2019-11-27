@@ -10,10 +10,10 @@ import os
 import platform
 import numpy as np
 import h5py
+import torch
 from util import AA_ID_DICT, calculate_dihedral_angles, protein_id_to_str, get_structure_from_angles,\
     structure_to_backbone_atoms, write_to_pdb, calculate_dihedral_angles_over_minibatch,\
     get_backbone_positions_from_angular_prediction, encode_primary_string
-import torch
 
 MAX_SEQUENCE_LENGTH = 2000
 
