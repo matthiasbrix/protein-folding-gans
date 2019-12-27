@@ -24,6 +24,29 @@ def get_model_data_gan(dataset):
     return params
 
 def get_model_data_dcgan(dataset):
+    if dataset.lower() == "celeba":
+        params = {
+            "epochs": 5,
+            "batch_size": 128,
+            "z_dim": 100,
+            "optimizer_G": torch.optim.Adam,
+            "optimizer_D": torch.optim.Adam,
+            "optim_config_G": {
+                "lr": 2e-4,
+                "weight_decay": None,
+                "betas": (0.5, 0.999)
+            },
+            "optim_config_D": {
+                "lr": 2e-4,
+                "weight_decay": None,
+                "betas": (0.5, 0.999)
+            }
+        }
+    else:
+        raise ValueError("Dataset not known!")
+    return params
+
+def get_model_data_contact_maps(dataset):
     if dataset.lower() == "proteins":
         params = {
             "epochs": 1000,

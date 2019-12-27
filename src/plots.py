@@ -2,13 +2,15 @@ import numpy as np
 import torch
 import torchvision
 import matplotlib.pyplot as plt
+import matplotlib.animation as animation
 from matplotlib import gridspec
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 DATASETS = {
     "mnist": "MNIST",
-    "proteins": "Proteins"
+    "proteins": "Proteins",
+    "celeba": "Celeba"
 }
 
 def _xticks(ls, ticks_rate):
@@ -105,3 +107,20 @@ def plot_grid(imgs, file_name, nrow=2, ncol=8):
     plt.show()
     if file_name:
         fig.savefig(file_name, bbox_inches="tight", pad_inches=0.0, transparent=False)
+
+def plot_celeba(imgs):
+    plt.figure(figsize=(8, 8))
+    plt.axis("off")
+    plt.title("Training Images")
+    n = min(len(imgs), 64)
+    plt.imshow(np.transpose(torchvision.utils.make_grid(imgs.to(DEVICE)[:n],\
+        padding=2, normalize=True).cpu(), (1, 2, 0)))
+
+def plot_animation_celeba(file_path, imgs, make_dirs):
+    fig = plt.figure(figsize=(8, 8))
+    ims = [[plt.imshow(np.transpose(i, (1, 2, 0)), animated=True)] for i in imgs]
+    anim = animation.ArtistAnimation(fig, ims, interval=1000, repeat_delay=1000, blit=True)
+    plt.axis("off")
+    plt.show()
+    if make_dirs:
+        anim.save(file_path+"/celeba.gif", dpi=80, writer="imagemagick")
