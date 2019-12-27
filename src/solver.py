@@ -447,7 +447,7 @@ if __name__ == "__main__":
     parser.add_argument("--residue_fragments", help="Set the number of residue fragments (optional)",\
         required=False, type=int)
     parser.add_argument("--save_files", help="Determine if files (samples etc.) should be saved (optional, default: False)",\
-        required=False, action='store_true')
+        required=False, action="store_true")
     parser.add_argument("--save_model_state", help="Determine if state of model should be saved after each epoch\
         during training (optional, default: False)", required=False, action="store_true")
 
@@ -476,7 +476,7 @@ if __name__ == "__main__":
         discriminator = Discriminator(1, 1)
     elif dataset_arg == "proteins":
         training_file = args["training_file"]
-        residue_fragments= args["residue_fragments"]
+        residue_fragments = args["residue_fragments"]
         data = get_model_data_contact_maps(dataset_arg)
         directories = Directories(model_arg.lower(), dataset_arg, data["z_dim"],\
             make_dirs=save_files)
