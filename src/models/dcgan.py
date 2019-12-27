@@ -1,184 +1,51 @@
 import torch.nn as nn
-import torch
-
-DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 class Generator(nn.Module):
-    def __init__(self, nz, res=16):
+    def __init__(self, nz, nc, ngf=64):
         super(Generator, self).__init__()
-        if res == 256:
-            self.layers = nn.Sequential(
-                nn.ConvTranspose2d(nz, 1024, 4, stride=4, padding=0), # 4x4
-                nn.BatchNorm2d(1024),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(1024, 512, 4, stride=2, padding=1), # 8x8
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(512, 512, 4, stride=2, padding=1), # 16x16
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1), # 32x32
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1), # 64x64
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1), # 128x128
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1), # 256x256
-            )
-        elif res == 128:
-            self.layers = nn.Sequential(
-                nn.ConvTranspose2d(nz, 512, 4, stride=4, padding=0),
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1),
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 128, 4, stride=4, padding=0),
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1)
-            )
-        elif res == 64:
-            self.layers = nn.Sequential(
-                nn.ConvTranspose2d(nz, 512, 4, stride=1, padding=0),
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(512, 256, 4, stride=2, padding=1),
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(64, 1, 4, stride=2, padding=1)
-            )
-        else:
-            self.layers = nn.Sequential(
-                nn.ConvTranspose2d(nz, 512, 4, stride=1, padding=0),
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(512, 256, 3, stride=1, padding=1),
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(256, 128, 4, stride=2, padding=1),
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(128, 64, 4, stride=2, padding=1),
-                nn.BatchNorm2d(64),
-                nn.LeakyReLU(0.2),
-                nn.ConvTranspose2d(64, 1, 3, stride=1, padding=1)
-            )
+        self.generator = nn.Sequential(
+            nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
+            nn.BatchNorm2d(ngf * 8),
+            nn.ReLU(True),
+            nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False), # state size. (ngf*8) x 4 x 4
+            nn.BatchNorm2d(ngf * 4),
+            nn.ReLU(True),
+            nn.ConvTranspose2d( ngf * 4, ngf * 2, 4, 2, 1, bias=False), # state size. (ngf*4) x 8 x 8
+            nn.BatchNorm2d(ngf * 2),
+            nn.ReLU(True),
+            nn.ConvTranspose2d( ngf * 2, ngf, 4, 2, 1, bias=False), # state size. (ngf*2) x 16 x 16
+            nn.BatchNorm2d(ngf),
+            nn.ReLU(True),
+            nn.ConvTranspose2d( ngf, nc, 4, 2, 1, bias=False), # state size. (ngf) x 32 x 32
+            nn.Tanh() # state size. (nc) x 64 x 64
+        )
 
-    def forward(self, z):
-        # expects 4-d N, C, H ,W
-        gz = self.layers(z)
-        return gz
+    def forward(self, imgs):
+        result = self.generator(imgs)
+        return result
 
-# rep the prob that x from the data rather than p_g
-# outputs a single scalar.
 class Discriminator(nn.Module):
-    def __init__(self, din, dout, res=16):
+    def __init__(self, nc, ndf=64):
         super(Discriminator, self).__init__()
-        if res == 256:
-            self.layers = nn.Sequential(
-                nn.Conv2d(din, 64, 4, stride=2, padding=1), # 128x128
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(64, 128, 4, stride=2, padding=1), # 64x64
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(128, 256, 4, stride=2, padding=1), # 32x32
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(256, 512, 4, stride=2, padding=1), # 16x16
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(512, 512, 4, stride=2, padding=1), # 8x8
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(512, 1024, 4, stride=2, padding=1), # 4x4
-                nn.BatchNorm2d(1024),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(1024, dout, 4, stride=1, padding=0), # 1x1
-                nn.Sigmoid()
-            )
-        elif res == 128:
-            self.layers = nn.Sequential(
-                nn.Conv2d(din, 64, 4, stride=2, padding=1),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(64, 128, 4, stride=2, padding=1),
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(128, 256, 4, stride=4, padding=0),
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(256, 512, 4, stride=2, padding=1),
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(512, dout, 4, stride=1, padding=0),
-                nn.Sigmoid()
-            )
-        elif res == 64:
-            self.layers = nn.Sequential(
-                nn.Conv2d(din, 64, 4, stride=2, padding=1),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(64, 128, 4, stride=2, padding=1),
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(128, 256, 4, stride=2, padding=1),
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(256, 512, 4, stride=2, padding=1),
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(512, dout, 4, stride=1, padding=0),
-                nn.Sigmoid()
-            )
-        else:
-            self.layers = nn.Sequential(
-                nn.Conv2d(din, 64, 3, stride=1, padding=1),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(64, 128, 4, stride=2, padding=1),
-                nn.BatchNorm2d(128),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(128, 256, 4, stride=2, padding=1),
-                nn.BatchNorm2d(256),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(256, 512, 3, stride=1, padding=1),
-                nn.BatchNorm2d(512),
-                nn.LeakyReLU(0.2),
-                nn.Dropout(0.1),
-                nn.Conv2d(512, dout, 4, stride=1, padding=0),
-                nn.Sigmoid()
-            )
+        self.discriminator = nn.Sequential(
+            nn.Conv2d(nc, ndf, 4, 2, 1, bias=False), # input is (nc) x 64 x 64
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False), # state size. (ndf) x 32 x 32
+            nn.BatchNorm2d(ndf * 2),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False), # state size. (ndf*2) x 16 x 16
+            nn.BatchNorm2d(ndf * 4),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False), # state size. (ndf*4) x 8 x 8
+            nn.BatchNorm2d(ndf * 8),
+            nn.LeakyReLU(0.2, inplace=True),
+            nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False), # state size. (ndf*8) x 4 x 4
+            nn.Sigmoid()
+        )
 
-    def forward(self, x):
-        # expects 4-D - N x C x H x W
-        return self.layers(x)
+    def forward(self, imgs):
+        result = self.discriminator(imgs)
+        return result
 
 class Dcgan(nn.Module):
     def __init__(self, input_dim, z_dim):

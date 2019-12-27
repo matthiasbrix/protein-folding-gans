@@ -3,6 +3,7 @@ import torch
 import numpy as np
 import os.path
 
+# from openprotein
 def calc_pairwise_distances(chain_a, chain_b, use_gpu):
     distance_matrix = torch.Tensor(chain_a.size()[0], chain_b.size()[0]).type(torch.float)
     # add small epsilon to avoid boundary issues
@@ -26,11 +27,6 @@ def atom_filter(residues, atom):
     else:
         return residues
 
-def pad_fragment(fragment, fragment_length):
-    tmp = torch.zeros((fragment_length, 3))
-    tmp[:fragment.shape[0]] = fragment
-    return torch.Tensor(tmp).type(torch.float) # dim is then fragment_length x 3
-
 # Pad the pairwise distance matrix
 def pad_pwd(pwd, fragment_length):
     tmp = torch.zeros((fragment_length, fragment_length))
@@ -44,18 +40,13 @@ def compute_contact_maps(residues, num_fragments_extract, fragment_length, paddi
         end = (fragment_id+1)*fragment_length
         # extracting fragment
         fragment = residues[start:end]
-        if padding == "fragment_pad":
-            if fragment.shape[0] < fragment_length:
-                fragment = pad_fragment(fragment, fragment_length)
-                # compute matrix on the fragments
-            contact_maps[fragment_id] = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
         if padding == "pwd_pad":
             pwd = calc_pairwise_distances(fragment, fragment, torch.cuda.is_available())
             # in case we extract remaining, that is < residue_fragments size, we pad
             if fragment.shape[0] < fragment_length:
                 pwd = pad_pwd(pwd, fragment_length)
             contact_maps[fragment_id] = pwd
-        if padding == "no_pad":
+        elif padding == "no_pad":
             if fragment.shape[0] < fragment_length:
                 contact_maps = np.delete(contact_maps, fragment_id, 0)
             else:

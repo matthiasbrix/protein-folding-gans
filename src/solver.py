@@ -5,15 +5,17 @@ import torch
 import torch.utils.data
 import torchvision
 
-import models.resnet
+import models.contact_maps_resnet
 from models.gan import Gan, Generator, Discriminator
 from models.dcgan import Dcgan, Generator, Discriminator
-from models.resnet import ResNet, ResGenNet, ResDiscNet
-from model_params import get_model_data_gan, get_model_data_dcgan
+from models.contact_maps_dcgan import CmDcgan, Generator, Discriminator
+from models.contact_maps_resnet import CmResNet, ResGenNet, ResDiscNet
+from model_params import get_model_data_gan, get_model_data_dcgan, get_model_data_contact_maps
 from directories import Directories
 from dataloader import DataLoader
 from sampling import gan_sampling, dcgan_sampling
 from plots import contact_map_grid
+from util import weights_init
 
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
@@ -89,7 +91,7 @@ class Testing(object):
             torch.save(self.generator.state_dict(), self.path)
             epoch += 1
 
-class Training(object):
+class TrainingContactMaps(object):
     def __init__(self, solver):
         self.solver = solver
 
@@ -156,7 +158,7 @@ class Training(object):
         # settings symmetric here because contact map is only distance to subsequent residues
         gz = (gz + gz.transpose(3, 2))/2 # set symmetric, transpose only spatial dims
         if isinstance(self.solver.discriminator, ResDiscNet):
-            models.resnet.DISCRIMINATOR = True
+            models.contact_maps_resnet.DISCRIMINATOR = True
         d_loss_real, d_loss_fake, d_loss = self._train_discriminator(x, gz.detach())
         g_loss = self._train_generator(gz)
         epoch_metrics.compute_batch_train_metrics(g_loss, d_loss_real, d_loss_fake, d_loss)
@@ -165,25 +167,112 @@ class Training(object):
         self.solver.generator.train()
         self.solver.discriminator.train()
         for _, train_batch in enumerate(self.solver.data_loader.train_loader):
+            contact_map = train_batch
+            # scale down the contact map
+            if self.solver.data_loader.residue_fragments == 16:
+                contact_map /= 10
+            elif self.solver.data_loader.residue_fragments == 64:
+                contact_map /= 100
+            elif self.solver.data_loader.residue_fragments >= 128:
+                contact_map /= 100
+            else:
+                raise ValueError("Scaling down went wrong!")
+            self._train_batch(epoch_metrics, contact_map)
+
+class TrainingGans(object):
+    def __init__(self, solver):
+        self.solver = solver
+
+    def _train_batch(self, epoch_metrics, x):
+        x = x.view(-1, self.solver.data_loader.input_dim).to(DEVICE)
+        batch_size = x.shape[0]
+        valid = torch.ones(batch_size, 1).to(DEVICE) # Discriminator label to real
+        fake = torch.zeros(batch_size, 1).to(DEVICE) # Discriminator label to fake
+        # -----------------
+        #  Train Generator
+        # -----------------
+        self.solver.optimizer_G.zero_grad()
+        # Sample noise as generator input
+        z = torch.randn((x.shape[0], self.solver.model.z_dim))
+        # Generate a batch of images
+        gen_imgs = self.solver.generator(z)
+        # Loss measures generator's ability to fool the discriminator
+        g_loss = self.solver.model.loss(self.solver.discriminator(gen_imgs), valid)
+        g_loss.backward()
+        self.solver.optimizer_G.step()
+        # ---------------------
+        #  Train Discriminator
+        # ---------------------
+        self.solver.optimizer_D.zero_grad()
+        # Measure discriminator's ability to classify real from generated samples
+        d_loss_real = self.solver.model.loss(self.solver.discriminator(x), valid)
+        d_loss_fake = self.solver.model.loss(self.solver.discriminator(gen_imgs.detach()), fake)
+        d_loss = (d_loss_real + d_loss_fake)/2
+        d_loss.backward()
+        self.solver.optimizer_D.step()
+        epoch_metrics.compute_batch_train_metrics(g_loss.item(), d_loss_real.item(),\
+            d_loss_fake.item(), d_loss.item())
+
+    def train(self, epoch_metrics):
+        self.solver.generator.train()
+        self.solver.discriminator.train()
+        for _, train_batch in enumerate(self.solver.data_loader.train_loader):
             if self.solver.data_loader.dataset == "mnist":
                 x, _ = train_batch[0], train_batch[1]
                 self._train_batch(epoch_metrics, x)
-            elif self.solver.data_loader.dataset == "proteins":
-                contact_map = train_batch
-                # scale down the contact map
-                if self.solver.data_loader.residue_fragments == 16:
-                    contact_map /= 10
-                elif self.solver.data_loader.residue_fragments == 64:
-                    contact_map /= 100
-                elif self.solver.data_loader.residue_fragments >= 128:
-                    contact_map /= 100
-                else:
-                    raise ValueError("Scaling down went wrong!")
-                self._train_batch(epoch_metrics, contact_map)
+
+class TrainingDcgans(object):
+    def __init__(self, solver):
+        self.solver = solver
+
+    def _train_batch(self, epoch_metrics, x, idx):
+        x = x.to(DEVICE)
+        batch_size = x.shape[0]
+        valid = torch.ones(batch_size, 1).to(DEVICE) # Discriminator Label to real
+        fake = torch.zeros(batch_size, 1).to(DEVICE) # Discriminator Label to fake
+        # -----------------
+        #  Train Generator
+        # -----------------
+        self.solver.optimizer_G.zero_grad()
+        # Sample noise as generator input, N x 100 x res x res
+        z = torch.randn((batch_size, self.solver.model.z_dim, 1, 1)).to(DEVICE)
+        # Generate a batch of images
+        gen_imgs = self.solver.generator(z)
+        # Loss measures generator's ability to fool the discriminator
+        g_loss = self.solver.model.loss(self.solver.discriminator(gen_imgs), valid)
+        g_loss.backward()
+        self.solver.optimizer_G.step()
+        # ---------------------
+        #  Train Discriminator
+        # ---------------------
+        self.solver.optimizer_D.zero_grad()
+        # Measure discriminator's ability to classify real from generated samples
+        d_loss_real = self.solver.model.loss(self.solver.discriminator(x), valid)
+        d_loss_fake = self.solver.model.loss(self.solver.discriminator(gen_imgs.detach()), fake)
+        d_loss = d_loss_real + d_loss_fake
+        d_loss.backward()
+        self.solver.optimizer_D.step()
+        epoch_metrics.compute_batch_train_metrics(g_loss.item(), d_loss_real.item(),\
+            d_loss_fake.item(), d_loss.item())
+        # Output training stats
+        if idx % 50 == 0:
+            print("[%d/%d][%d/%d]\tLoss_D: %.4f\tLoss_G: %.4f\tD(x): %.4f\tD(G(z)): %.4f / %.4f"
+                  % (self.solver.epoch, self.solver.epochs, idx,\
+                    len(self.solver.data_loader.train_loader),
+                    d_loss.item(), g_loss.item(), d_loss_real.item(),\
+                    d_loss_fake.item(), g_loss.item()))
+
+    def train(self, epoch_metrics):
+        self.solver.generator.train()
+        self.solver.discriminator.train()
+        for idx, train_batch in enumerate(self.solver.data_loader.train_loader, 0):
+            if self.solver.data_loader.dataset == "celeba":
+                x, y = train_batch
+                self._train_batch(epoch_metrics, x, idx)
 
 class Solver():
     def __init__(self, model, generator, discriminator, epochs, data_loader, optimizer_G, optimizer_D,\
-        optim_config_G, optim_config_D, max_sequence_length, one_sided_labeling, g_updates,\
+        optim_config_G, optim_config_D, max_sequence_length=None, one_sided_labeling=None, g_updates=None,\
         num_samples=100, save_model_state=False):
         self.data_loader = data_loader
         self.model = model
@@ -199,6 +288,7 @@ class Solver():
         self.epoch = 0
         self.epochs = epochs
         self.train_loss_history = {x: [] for x in ["epochs", "g_loss", "d_loss_real", "d_loss_fake", "d_loss"]}
+        self.train_gen_imgs = []
         self.num_samples = num_samples
         self.one_sided_labeling = one_sided_labeling
         self.g_updates = g_updates
@@ -206,6 +296,10 @@ class Solver():
         if save_model_state and not self.data_loader.directories.make_dirs:
             raise ValueError("Can't save state if no folder is assigned to this run!")
         self.save_model_state = save_model_state
+
+        if self.data_loader.dataset == "celeba":
+            self.generator.apply(weights_init)
+            self.discriminator.apply(weights_init)
 
     def _set_weight_decay(self, optim_config):
         if optim_config["weight_decay"] is None:
@@ -251,11 +345,18 @@ class Solver():
             return
         with torch.no_grad():
             num_samples = min(self.num_samples, self.data_loader.batch_size)
+            min_row = min(10, num_samples)
             if self.data_loader.dataset == "mnist":
                 sample = gan_sampling(self.generator, self.model.z_dim, num_samples).cpu()
                 torchvision.utils.save_image(sample.view(num_samples, *self.data_loader.img_dims),\
                     self.data_loader.directories.result_dir + "/generated_sample_" + str(epoch)\
-                    + "_z=" + str(self.model.z_dim) + ".png", nrow=10, normalize=True)
+                    + "_z=" + str(self.model.z_dim) + ".png", nrow=min_row, normalize=True)
+            elif self.data_loader.data == "celeba":
+                sample = dcgan_sampling(self.generator, self.model.z_dim, num_samples).cpu()
+                self.train_gen_imgs.append(torchvision.utils.make_grid(sample, padding=2, normalize=True))
+                torchvision.utils.save_image(sample.view(num_samples, *self.data_loader.img_dims),\
+                    self.data_loader.directories.result_dir + "/generated_sample_" + str(epoch)\
+                    + "_z=" + str(self.model.z_dim) + ".png", nrow=min_row, normalize=True)
             elif self.data_loader.dataset == "proteins":
                 imgs, rows, cols = self.get_sample_stats()
                 # dcgan sampling is the same for resnet
@@ -284,11 +385,11 @@ class Solver():
             params += "img dims: {}\n".format(self.data_loader.img_dims)
             if self.data_loader.dataset == "proteins":
                 params += "atom: {}\n".format(self.data_loader.atom)
-            params += "Max sequence length: {}\n".format(self.max_sequence_length)
-            params += "training file: {}\n".format(self.data_loader.training_file)
-            params += "padding: {}\n".format(self.data_loader.padding)
-            params += "g_updates: {}\n".format(self.g_updates)
-            params += "one_sided_labeling: {}\n".format(self.one_sided_labeling)
+                params += "Max sequence length: {}\n".format(self.max_sequence_length)
+                params += "padding: {}\n".format(self.data_loader.padding)
+                params += "g_updates: {}\n".format(self.g_updates)
+                params += "one_sided_labeling: {}\n".format(self.one_sided_labeling)
+                params += "training file: {}\n".format(self.data_loader.training_file)
             params += str(self.model)
             params += str(self.generator)
             params += str(self.discriminator)
@@ -300,7 +401,8 @@ class Solver():
         if not self.data_loader.directories.make_dirs:
             return
         name = self.data_loader.directories.result_dir + "/model_"
-        name += "GAN_"
+        name += self.data_loader.directories.model_name
+        name += "_"
         name += self.data_loader.dataset + "_z=" + str(self.model.z_dim) + ".pt"
         torch.save(self, name)
 
@@ -312,7 +414,12 @@ class Solver():
         else:
             print("+++++ START RUN +++++ | no save mode")
         self._save_model_params_to_file()
-        training = Training(self)
+        if self.data_loader.dataset == "proteins":
+            training = TrainingContactMaps(self)
+        elif self.data_loader.dataset == "celeba":
+            training = TrainingDcgans(self)
+        else:
+            training = TrainingGans(self)
         start = self.epoch if self.epoch else 1
         for epoch in range(start, self.epochs+1):
             epoch_watch = time.time()
@@ -332,17 +439,17 @@ class Solver():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Script for training a model (GAN)")
     parser.add_argument("--model", help="Set model to GAN/DCGAN (required)", required=True)
-    parser.add_argument("--dataset", help="Set dataset to MNIST/PROTEINS accordingly (required, not case sensitive)",\
+    parser.add_argument("--dataset", help="Set dataset to MNIST/CELEBA/PROTEINS accordingly (required, not case sensitive)",\
         required=True)
-    parser.add_argument("--training_file", help="Set the training file to use for protein sequences",\
-        required=True)
-    parser.add_argument("--max_sequence_length", help="Set the max sequence length", required=True, type=int)
+    parser.add_argument("--training_file", help="Set the training file to use for protein sequences (optional)",\
+        required=False)
+    parser.add_argument("--max_sequence_length", help="Set the max sequence length (optional)", required=False, type=int)
     parser.add_argument("--residue_fragments", help="Set the number of residue fragments (optional)",\
         required=False, type=int)
     parser.add_argument("--save_files", help="Determine if files (samples etc.) should be saved (optional, default: False)",\
         required=False, action='store_true')
     parser.add_argument("--save_model_state", help="Determine if state of model should be saved after each epoch\
-        during training (optional, default: False)", required=False, action='store_true')
+        during training (optional, default: False)", required=False, action="store_true")
 
     args = vars(parser.parse_args())
     model_arg = args["model"]
@@ -360,21 +467,31 @@ if __name__ == "__main__":
         generator = Generator(data["z_dim"], data_loader.input_dim, data_loader.img_dims)
         discriminator = Discriminator(data_loader.input_dim, 1)
     elif model_arg.lower() == "dcgan":
+        data = get_model_data_dcgan(dataset_arg)
+        directories = Directories(model_arg.lower(), dataset_arg, data["z_dim"],\
+            make_dirs=save_files)
+        data_loader = DataLoader(directories, data["batch_size"], dataset_arg)
+        model = Dcgan(data_loader.input_dim, data["z_dim"])
+        generator = Generator(data["z_dim"])
+        discriminator = Discriminator(1, 1)
+    elif dataset_arg == "proteins":
         training_file = args["training_file"]
         residue_fragments= args["residue_fragments"]
-        data = get_model_data_dcgan(dataset_arg)
+        data = get_model_data_contact_maps(dataset_arg)
         directories = Directories(model_arg.lower(), dataset_arg, data["z_dim"],\
             make_dirs=save_files)
         data_loader = DataLoader(directories, data["batch_size"], dataset_arg.lower(),
                         training_file=training_file, residue_fragments=residue_fragments,\
                         atom="calpha", padding=data["padding"])
-        #model = Dcgan(data_loader.input_dim, data["z_dim"])
-        #generator = Generator(data["z_dim"], res=residue_fragments)
-        #discriminator = Discriminator(1, 1, res=residue_fragments)
-        n = 5
-        model = ResNet(data_loader.input_dim, data["z_dim"])
-        generator = ResGenNet(data["z_dim"], n)
-        discriminator = ResDiscNet(n)
+        if model_arg.lower() == "contact_maps_dcgan":
+            model = CmDcgan(data_loader.input_dim, data["z_dim"])
+            generator = Generator(data["z_dim"], res=residue_fragments)
+            discriminator = Discriminator(1, 1, res=residue_fragments)
+        elif model_arg.lower() == "contact_maps_resnet":
+            n = 5
+            model = CmResNet(data_loader.input_dim, data["z_dim"])
+            generator = ResGenNet(data["z_dim"], n)
+            discriminator = ResDiscNet(n)
     solver = Solver(model, generator, discriminator, data["epochs"], data_loader, data["optimizer_G"],
                     data["optimizer_D"], data["optim_config_G"], data["optim_config_D"], max_sequence_length,\
                     data["one_sided_labeling"], data["g_updates"], save_model_state=save_model_state)

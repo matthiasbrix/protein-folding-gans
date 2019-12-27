@@ -1,12 +1,9 @@
-import torch
 import torch.nn as nn
 
 from functools import partial
 
 """
-
 Inspired by https://github.com/FrancescoSaverioZuppichini/ResNet
-
 """
 
 DISCRIMINATOR = False
@@ -183,9 +180,9 @@ class ResDiscNet(nn.Module):
         d = self.last_disc_layer(d) # 1 x 1
         return d
 
-class ResNet(nn.Module):
+class CmResNet(nn.Module):
     def __init__(self, input_dim, z_dim):
-        super(ResNet, self).__init__()
+        super(CmResNet, self).__init__()
         self.z_dim = z_dim
         self.input_dim = input_dim
         self.loss = nn.BCELoss()
